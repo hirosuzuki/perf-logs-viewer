@@ -15,8 +15,22 @@
           <a class="navbar-item" href="/"> Perf Logs Viewer </a>
         </div>
       </nav>
-      <h1 class="title">Hello World</h1>
-      <p class="subtitle">My first website with <strong>Bulma</strong>!</p>
+
+      <table class="table is-hoverable is-fullwidth">
+        <tr>
+            <th>Trace ID</th>
+            <th>実行時刻</th>
+            <th colspan="10">操作</th>
+        </tr>
+        {{ range $trace := .traces }}
+        <tr>
+            <td>{{ $trace.ID }}</td>
+            <td>{{ $trace.ExecAt.Format "2006-01-02 15:04:05" }}</td>
+            <td>-</td>
+        </tr>
+        {{ end }}
+    </table>
+
     </div>
   </body>
 </html>
