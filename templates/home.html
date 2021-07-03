@@ -18,19 +18,34 @@
 
       <table class="table is-hoverable is-fullwidth">
         <tr>
-            <th>Trace ID</th>
-            <th>実行時刻</th>
-            <th colspan="10">操作</th>
+          <th rowspan="2">Trace ID</th>
+          <th rowspan="2">実行時刻</th>
+          <th colspan="2">Webアクセスログ</th>
+          <th colspan="2">SQLログ</th>
+        </tr>
+        <tr>
+          <th>ファイルサイズ</th>
+          <th>操作</th>
+          <th>ファイルサイズ</th>
+          <th>操作</th>
         </tr>
         {{ range $trace := .traces }}
         <tr>
-            <td>{{ $trace.ID }}</td>
-            <td>{{ $trace.ExecAt.Format "2006-01-02 15:04:05" }}</td>
-            <td>-</td>
+          <td>{{ $trace.ID }}</td>
+          <td>{{ $trace.ExecAt.Format "2006-01-02 15:04:05" }}</td>
+          <td>{{ $trace.AccessLogSize }}</td>
+          <td>
+            <a href="#">生ログ</a>
+            <a href="#">分析</a>
+          </td>
+          <td>{{ $trace.SQLLogSize }}</td>
+          <td>
+            <a href="#">生ログ</a>
+            <a href="#">分析</a>
+          </td>
         </tr>
         {{ end }}
-    </table>
-
+      </table>
     </div>
   </body>
 </html>

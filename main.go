@@ -1,13 +1,15 @@
 package main
 
 import (
+	"html/template"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
-	"text/template"
+	"strconv"
 	"time"
 )
 
@@ -26,8 +28,10 @@ func getenv(key string, defaultValue string) string {
 }
 
 type Trace struct {
-	ID     string `json:"id"`
-	ExecAt time.Time
+	ID            string `json:"id"`
+	ExecAt        time.Time
+	AccessLogSize int64
+	SQLLogSize    int64
 }
 
 func checkTraceID(v string) bool {
@@ -35,8 +39,21 @@ func checkTraceID(v string) bool {
 	return rep.MatchString(v)
 }
 
+func getFileSize(filename string) int64 {
+	file, err := os.Open(filename)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+	stat, err := file.Stat()
+	if err != nil {
+		return 0
+	}
+	return stat.Size()
+}
+
 func getTraces() []Trace {
-	files, err := ioutil.ReadDir("./logs")
+	files, err := ioutil.ReadDir(perflogs_dir)
 	if err != nil {
 		panic(err)
 	}
@@ -47,12 +64,33 @@ func getTraces() []Trace {
 			traceID := file.Name()
 			t, _ := time.Parse("20060102-150405", traceID)
 			jt := t.In(jst)
-			trace := Trace{ID: traceID, ExecAt: jt}
+			trace := Trace{
+				ID:            traceID,
+				ExecAt:        jt,
+				AccessLogSize: getFileSize(filepath.Join(perflogs_dir, traceID, "access.log")),
+				SQLLogSize:    getFileSize(filepath.Join(perflogs_dir, traceID, "sql.log")),
+			}
 			traceList = append(traceList, trace)
 		}
 	}
 	sort.Slice(traceList, func(i int, j int) bool { return traceList[i].ID > traceList[j].ID })
 	return traceList
+}
+
+func numFormat(value int64) string {
+	s := strconv.FormatInt(value%1000, 10)
+	if value < 1000 {
+		return s
+	}
+	return numFormat(value/1000) + "," + s
+}
+
+func numFormatS(s string) string {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return "NaN"
+	}
+	return numFormat(v)
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +100,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	traces := getTraces()
+	log.Println(traces)
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
 	if t.Execute(w, map[string]interface{}{"traces": traces}) != nil {
@@ -69,10 +108,15 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+var (
+	perflogs_port string
+	perflogs_dir  string
+)
+
 func main() {
 	// Load Settings
-	perflogs_port := getenv("PERFLOGS_PORT", ":8080")
-	perflogs_dir := getenv("PERFLOGS_DIRN", "logs")
+	perflogs_port = getenv("PERFLOGS_PORT", ":8080")
+	perflogs_dir = getenv("PERFLOGS_DIRN", "logs")
 	// Log Start Message
 	log.Printf("Start Perf-Logs-Viewer (port=%s, dir=%s)\n", perflogs_port, perflogs_dir)
 	// Routing Settings
