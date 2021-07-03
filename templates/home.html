@@ -33,12 +33,12 @@
         <tr>
           <td>{{ $trace.ID }}</td>
           <td>{{ $trace.ExecAt.Format "2006-01-02 15:04:05" }}</td>
-          <td>{{ $trace.AccessLogSize }}</td>
+          <td class="has-text-right">{{ num $trace.AccessLogSize }} bytes</td>
           <td>
             <a href="#">生ログ</a>
             <a href="#">分析</a>
           </td>
-          <td>{{ $trace.SQLLogSize }}</td>
+          <td class="has-text-right">{{ num $trace.SQLLogSize }} bytes</td>
           <td>
             <a href="#">生ログ</a>
             <a href="#">分析</a>

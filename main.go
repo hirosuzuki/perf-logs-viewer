@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -78,29 +79,22 @@ func getTraces() []Trace {
 }
 
 func numFormat(value int64) string {
-	s := strconv.FormatInt(value%1000, 10)
 	if value < 1000 {
-		return s
+		return strconv.FormatInt(value%1000, 10)
 	}
-	return numFormat(value/1000) + "," + s
-}
-
-func numFormatS(s string) string {
-	v, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return "NaN"
-	}
-	return numFormat(v)
+	return numFormat(value/1000) + "," + fmt.Sprintf("%03d", value%1000)
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
-	t, err := template.ParseFiles("templates/home.html")
+	funcmap := template.FuncMap{
+		"num": numFormat,
+	}
+	t, err := template.New("home.html").Funcs(funcmap).ParseFiles("templates/home.html")
 	if err != nil {
 		log.Printf("%s\n", err.Error())
 		return
 	}
 	traces := getTraces()
-	log.Println(traces)
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
 	if t.Execute(w, map[string]interface{}{"traces": traces}) != nil {
