@@ -10,38 +10,36 @@
   </head>
   <body>
     <div class="container">
-      <nav class="navbar" role="navigation" aria-label="main navigation">
-        <div class="navbar-brand">
-          <a class="navbar-item" href="/"> Perf Logs Viewer </a>
+      <div class="columns">
+        <div class="column is-four-fifths mt-2 mb-2">
+          <h1 class="is-size-4">Perf Logs Viewer</h1>
         </div>
-      </nav>
-
+        <div class="column has-text-right my-auto mr-5">
+          <a href="#">Settings</a>
+        </div>
+      </div>
       <table class="table is-hoverable is-fullwidth">
         <tr>
-          <th rowspan="2">Trace ID</th>
-          <th rowspan="2">実行時刻</th>
-          <th colspan="2">Webアクセスログ</th>
-          <th colspan="2">SQLログ</th>
-        </tr>
-        <tr>
-          <th>ファイルサイズ</th>
-          <th>操作</th>
-          <th>ファイルサイズ</th>
-          <th>操作</th>
+          <th rowspan="1">Trace ID</th>
+          <th rowspan="1">Start Time</th>
+          <th colspan="3">Web Server Logs</th>
+          <th colspan="3">SQL Logs</th>
         </tr>
         {{ range $trace := .traces }}
         <tr>
-          <td>{{ $trace.ID }}</td>
-          <td>{{ $trace.ExecAt.Format "2006-01-02 15:04:05" }}</td>
-          <td class="has-text-right">{{ num $trace.AccessLogSize }} bytes</td>
+          <td ><a href="/detail/{{ $trace.ID }}">{{ $trace.ID }}</a></td>
+          <td >{{ $trace.ExecAt.Format "2006-01-02 15:04:05" }}</td>
+          <td class="has-text-right">All Servers</td>
+          <td class="has-text-right">{{ num $trace.AccessLogTotal }} bytes</td>
           <td>
-            <a href="#">生ログ</a>
-            <a href="#">分析</a>
+            <a href="/raw/access/{{ $trace.ID }}">Raw</a>
+            <a href="/kataribe/{{ $trace.ID }}">Kataribe</a>
           </td>
-          <td class="has-text-right">{{ num $trace.SQLLogSize }} bytes</td>
+          <td class="has-text-right">All Servers</td>
+          <td class="has-text-right">{{ num $trace.SQLLogTolal }} bytes</td>
           <td>
-            <a href="#">生ログ</a>
-            <a href="#">分析</a>
+            <a href="/raw/sql/{{ $trace.ID }}">Raw</a>
+            <a href="/sqlanalyze/{{ $trace.ID }}">Analyze</a>
           </td>
         </tr>
         {{ end }}
