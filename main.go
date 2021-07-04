@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 var (
@@ -140,7 +142,8 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func detailHandler(w http.ResponseWriter, r *http.Request) {
-	tradeID := r.URL.Path[8:]
+	vars := mux.Vars(r)
+	tradeID := vars["code"]
 	filename := filepath.Join(perflogs_dir, tradeID)
 	f, err := os.Open(filename)
 	defer f.Close()
@@ -162,17 +165,20 @@ var (
 )
 
 func main() {
+
 	// Load Settings
 	perflogs_port = getenv("PERFLOGS_PORT", ":8080")
 	perflogs_dir = getenv("PERFLOGS_DIRN", "logs")
+
 	// Log Start Message
 	log.Printf("Start Perf-Logs-Viewer (port=%s, dir=%s)\n", perflogs_port, perflogs_dir)
+
 	// Routing Settings
-	fs := http.FileServer(http.Dir("./static"))
-	http.Handle("/static/", http.StripPrefix("/static/", fs))
-	http.Handle("/favicon.ico", fs)
-	http.HandleFunc("/detail/", detailHandler)
-	http.HandleFunc("/", homeHandler)
+	router := mux.NewRouter()
+	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+	router.HandleFunc("/detail/{code}", detailHandler)
+	router.HandleFunc("/", homeHandler)
+
 	// Start Web App Server
-	log.Fatal(http.ListenAndServe(perflogs_port, nil))
+	log.Fatal(http.ListenAndServe(perflogs_port, router))
 }
