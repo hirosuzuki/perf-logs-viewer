@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -42,7 +41,7 @@ type LogFile struct {
 	Size     int64
 }
 
-type Trace struct {
+type LogSet struct {
 	ID             string `json:"id"`
 	ExecAt         time.Time
 	AccessLogs     []LogFile
@@ -51,74 +50,81 @@ type Trace struct {
 	SQLLogTolal    int64
 }
 
-func checkTraceID(v string) bool {
-	rep := regexp.MustCompile(`^[0-9]{8}-[0-9]{6}$`)
-	return rep.MatchString(v)
-}
-
-func makeLogFile(logfile fs.FileInfo, traceID string, prefix string) (LogFile, bool) {
-	logfileName := logfile.Name()
-	if strings.HasPrefix(logfileName, prefix) && strings.HasSuffix(logfileName, ".log") {
-		filesize := logfile.Size()
-		var code string = logfileName[len(prefix) : len(logfileName)-len(".log")]
-		return LogFile{Code: code, Filename: filepath.Join(perflogs_path, traceID, logfile.Name()), Size: filesize}, true
+func makeLogFile(logfile fs.FileInfo, logSetID string, prefix string) (LogFile, bool) {
+	name := logfile.Name()
+	if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".log") {
+		code := name[len(prefix) : len(name)-len(".log")]
+		if strings.HasPrefix(code, "-") {
+			code = code[1:]
+		}
+		return LogFile{Code: code, Filename: filepath.Join(perflogs_path, logSetID, name), Size: logfile.Size()}, true
 	}
 	return LogFile{}, false
 }
 
-func getTrace(file fs.FileInfo) (Trace, error) {
-	if !checkTraceID(file.Name()) {
-		return Trace{}, errors.New("No Trace ID")
+func fetchLogSet(file fs.FileInfo) (LogSet, error) {
+	// ファイル名のチェック
+	logSetID := file.Name()
+	if !regexp.MustCompile(`^[0-9]{8}-[0-9]{6}$`).MatchString(logSetID) {
+		return LogSet{}, fmt.Errorf("Invalid LogSet name %s", logSetID)
 	}
 
-	traceID := file.Name()
-	t, _ := time.Parse("20060102-150405", traceID)
-	jst := time.FixedZone("Asia/Tokyo", 9*60*60)
-	jt := t.In(jst)
-	accessLogs := []LogFile{}
-	var accessLogTotal int64
-	sqlLogs := []LogFile{}
-	var sqlLogTotal int64
-	logfiles, err := ioutil.ReadDir(filepath.Join(perflogs_path, traceID))
+	// ファイル名から実行時間を算出
+	execAt, err := time.Parse("20060102-150405", logSetID)
 	if err != nil {
-		return Trace{}, err
+		return LogSet{}, fmt.Errorf("Invalid LogSet name %s", logSetID)
+	}
+	execAt = execAt.In(time.FixedZone("Asia/Tokyo", 9*60*60))
+
+	accessLogs := []LogFile{}
+	sqlLogs := []LogFile{}
+
+	// ログファイルの収集
+	logfiles, err := ioutil.ReadDir(filepath.Join(perflogs_path, logSetID))
+	if err != nil {
+		return LogSet{}, err
 	}
 	for _, logfile := range logfiles {
-		if accessLog, ok := makeLogFile(logfile, traceID, "access"); ok {
+		if accessLog, ok := makeLogFile(logfile, logSetID, "access"); ok {
 			accessLogs = append(accessLogs, accessLog)
-			accessLogTotal += accessLog.Size
 		}
-		if sqlLog, ok := makeLogFile(logfile, traceID, "sql"); ok {
+		if sqlLog, ok := makeLogFile(logfile, logSetID, "sql"); ok {
 			sqlLogs = append(sqlLogs, sqlLog)
-			sqlLogTotal += sqlLog.Size
 		}
 	}
 
-	trace := Trace{
-		ID:             traceID,
-		ExecAt:         jt,
-		AccessLogTotal: accessLogTotal,
-		AccessLogs:     accessLogs,
-		SQLLogTolal:    sqlLogTotal,
-		SQLLogs:        sqlLogs,
+	// ファイルサイズの合計計算関数
+	calcTotalFileSize := func(logs []LogFile) int64 {
+		var result int64
+		for _, log := range logs {
+			result += log.Size
+		}
+		return result
 	}
 
-	return trace, nil
+	return LogSet{
+		ID:             logSetID,
+		ExecAt:         execAt,
+		AccessLogTotal: calcTotalFileSize(accessLogs),
+		AccessLogs:     accessLogs,
+		SQLLogTolal:    calcTotalFileSize(sqlLogs),
+		SQLLogs:        sqlLogs,
+	}, nil
 }
 
-func getTraces() []Trace {
+func fetchLogSetList() ([]LogSet, error) {
 	files, err := ioutil.ReadDir(perflogs_path)
 	if err != nil {
-		panic(err)
+		return []LogSet{}, err
 	}
-	traceList := []Trace{}
+	logSetList := []LogSet{}
 	for _, file := range files {
-		if trace, err := getTrace(file); err == nil {
-			traceList = append(traceList, trace)
+		if logSet, err := fetchLogSet(file); err == nil {
+			logSetList = append(logSetList, logSet)
 		}
 	}
-	sort.Slice(traceList, func(i int, j int) bool { return traceList[i].ID > traceList[j].ID })
-	return traceList
+	sort.Slice(logSetList, func(i int, j int) bool { return logSetList[i].ID > logSetList[j].ID })
+	return logSetList, nil
 }
 
 func numFormat(value int64) string {
@@ -137,84 +143,78 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("%s\n", err.Error())
 		return
 	}
-	traces := getTraces()
+	logSetList, err := fetchLogSetList()
+	if err != nil {
+		log.Printf("%v", err.Error())
+	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	if t.Execute(w, map[string]interface{}{"traces": traces}) != nil {
-		log.Printf("%s\n", err.Error())
+	if t.Execute(w, map[string]interface{}{"logSetList": logSetList}) != nil {
+		log.Printf("%s", err.Error())
 	}
 }
 
-func getTraceFromID(traceID string) (Trace, error) {
-	filename := filepath.Join(perflogs_path, traceID)
+func getLogSetFromID(logSetID string) (LogSet, error) {
+	filename := filepath.Join(perflogs_path, logSetID)
 	f, err := os.Open(filename)
 	defer f.Close()
 	if err != nil {
-		return Trace{}, err
+		return LogSet{}, err
 	}
 	if fs, err := f.Stat(); err != nil {
-		return Trace{}, err
+		return LogSet{}, err
 	} else {
-		return getTrace(fs)
+		return fetchLogSet(fs)
 	}
 }
 
 func detailHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	traceID := vars["code"]
-	trace, err := getTraceFromID(traceID)
+	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
+		log.Printf("%s", err.Error())
 		w.WriteHeader(404)
 		return
 	}
-	log.Printf("%v\n", trace)
+	log.Printf("%v\n", logSet)
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	fmt.Fprintf(w, "OK %s", trace.ID)
+	fmt.Fprintf(w, "OK %s", logSet.ID)
 }
 
 func outputLogs(w io.Writer, logs []LogFile) {
 	for _, log := range logs {
-		fp, err := os.Open(log.Filename)
-		defer fp.Close()
+		buf, err := ioutil.ReadFile(log.Filename)
 		if err == nil {
-			buf, err := ioutil.ReadAll(fp)
-			if err == nil {
-				w.Write(buf)
-			}
+			w.Write(buf)
 		}
 	}
 }
 
 func rawAccessHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	traceID := vars["code"]
-	trace, err := getTraceFromID(traceID)
+	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
+		log.Printf("%s", err.Error())
 		w.WriteHeader(404)
 		return
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
-	outputLogs(w, trace.AccessLogs)
+	outputLogs(w, logSet.AccessLogs)
 }
 
 func rawSqlHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	traceID := vars["code"]
-	trace, err := getTraceFromID(traceID)
+	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
+		log.Printf("%s", err.Error())
 		w.WriteHeader(404)
 		return
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
-	outputLogs(w, trace.SQLLogs)
-}
-
-func fileExists(filename string) bool {
-	_, err := os.Stat(filename)
-	return err == nil
+	outputLogs(w, logSet.SQLLogs)
 }
 
 func getKataribePath() string {
@@ -231,24 +231,21 @@ func getKataribePath() string {
 	return kataribePath
 }
 
-func cmdExec(w io.Writer, logs []LogFile, name string, arg ...string) error {
-	cmd := exec.Command(name, arg...)
-	pipe, err := cmd.StdinPipe()
+func execCommandFromLogsToWriter(w io.Writer, logs []LogFile, name string, arg ...string) error {
+	command := exec.Command(name, arg...)
+	stdinPipe, err := command.StdinPipe()
 	if err != nil {
 		return err
 	}
-	cmd.Stdout = w
-	err = cmd.Start()
-	if err != nil {
+	command.Stdout = w
+	if err = command.Start(); err != nil {
 		return err
 	}
-	outputLogs(pipe, logs)
-	err = pipe.Close()
-	if err != nil {
+	outputLogs(stdinPipe, logs)
+	if err = stdinPipe.Close(); err != nil {
 		return err
 	}
-	err = cmd.Wait()
-	if err != nil {
+	if err = command.Wait(); err != nil {
 		return err
 	}
 	return nil
@@ -256,33 +253,33 @@ func cmdExec(w io.Writer, logs []LogFile, name string, arg ...string) error {
 
 func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	traceID := vars["code"]
-	trace, err := getTraceFromID(traceID)
+	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
+		log.Printf("%s", err.Error())
 		w.WriteHeader(404)
 		return
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
-	err = cmdExec(w, trace.AccessLogs, getKataribePath())
+	err = execCommandFromLogsToWriter(w, logSet.AccessLogs, getKataribePath())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+		log.Printf("%v", err.Error())
 	}
 }
 
 func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	traceID := vars["code"]
-	trace, err := getTraceFromID(traceID)
+	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
+		log.Printf("%s", err.Error())
 		w.WriteHeader(404)
 		return
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
-	err = cmdExec(w, trace.SQLLogs, "python3", "parse_log.py")
+	err = execCommandFromLogsToWriter(w, logSet.SQLLogs, "python3", "parse_log.py")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+		log.Printf("%v", err.Error())
 	}
 }
 
@@ -303,11 +300,11 @@ func main() {
 	// Routing Settings
 	router := mux.NewRouter()
 	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
-	router.HandleFunc("/detail/{code}", detailHandler)
-	router.HandleFunc("/raw/access/{code}", rawAccessHandler)
-	router.HandleFunc("/raw/sql/{code}", rawSqlHandler)
-	router.HandleFunc("/kataribe/{code}", kataribeHandler)
-	router.HandleFunc("/sqlanalyze/{code}", sqlAnalyzeHandler)
+	router.HandleFunc("/detail/{id}", detailHandler)
+	router.HandleFunc("/raw/access/{id}", rawAccessHandler)
+	router.HandleFunc("/raw/sql/{id}", rawSqlHandler)
+	router.HandleFunc("/kataribe/{id}", kataribeHandler)
+	router.HandleFunc("/sqlanalyze/{id}", sqlAnalyzeHandler)
 	router.HandleFunc("/", homeHandler)
 
 	// Start Web App Server

@@ -21,26 +21,26 @@
       </div>
       <table class="table is-hoverable is-fullwidth">
         <tr>
-          <th rowspan="1">Trace ID</th>
+          <th rowspan="1">ID</th>
           <th rowspan="1">Start Time</th>
           <th colspan="3">Web Server Logs</th>
           <th colspan="3">SQL Logs</th>
         </tr>
-        {{ range $trace := .traces }}
+        {{ range $logSet := .logSetList }}
         <tr>
-          <td ><a href="/detail/{{ $trace.ID }}">{{ $trace.ID }}</a></td>
-          <td >{{ $trace.ExecAt.Format "2006-01-02 15:04:05" }}</td>
+          <td ><a href="/detail/{{ $logSet.ID }}">{{ $logSet.ID }}</a></td>
+          <td >{{ $logSet.ExecAt.Format "2006-01-02 15:04:05" }}</td>
           <td class="has-text-right">All Servers</td>
-          <td class="has-text-right">{{ num $trace.AccessLogTotal }} bytes</td>
+          <td class="has-text-right">{{ num $logSet.AccessLogTotal }} bytes</td>
           <td>
-            <a href="/raw/access/{{ $trace.ID }}">Raw</a>
-            <a href="/kataribe/{{ $trace.ID }}">Kataribe</a>
+            <a href="/raw/access/{{ $logSet.ID }}">Raw</a>
+            <a href="/kataribe/{{ $logSet.ID }}">Kataribe</a>
           </td>
           <td class="has-text-right">All Servers</td>
-          <td class="has-text-right">{{ num $trace.SQLLogTolal }} bytes</td>
+          <td class="has-text-right">{{ num $logSet.SQLLogTolal }} bytes</td>
           <td>
-            <a href="/raw/sql/{{ $trace.ID }}">Raw</a>
-            <a href="/sqlanalyze/{{ $trace.ID }}">Analyze</a>
+            <a href="/raw/sql/{{ $logSet.ID }}">Raw</a>
+            <a href="/sqlanalyze/{{ $logSet.ID }}">Analyze</a>
           </td>
         </tr>
         {{ end }}
