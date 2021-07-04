@@ -62,17 +62,21 @@ func makeLogFile(logfile fs.FileInfo, logSetID string, prefix string) (LogFile, 
 	return LogFile{}, false
 }
 
+func isValidLogSetID(id string) bool {
+	return regexp.MustCompile(`^[0-9]{8}-[0-9]{6}$`).MatchString(id)
+}
+
 func fetchLogSet(file fs.FileInfo) (LogSet, error) {
 	// ファイル名のチェック
 	logSetID := file.Name()
-	if !regexp.MustCompile(`^[0-9]{8}-[0-9]{6}$`).MatchString(logSetID) {
-		return LogSet{}, fmt.Errorf("Invalid LogSet name %s", logSetID)
+	if !isValidLogSetID(logSetID) {
+		return LogSet{}, fmt.Errorf("Invalid LogSet ID %s", logSetID)
 	}
 
 	// ファイル名から実行時間を算出
 	execAt, err := time.Parse("20060102-150405", logSetID)
 	if err != nil {
-		return LogSet{}, fmt.Errorf("Invalid LogSet name %s", logSetID)
+		return LogSet{}, fmt.Errorf("Invalid LogSet ID %s", logSetID)
 	}
 	execAt = execAt.In(time.FixedZone("Asia/Tokyo", 9*60*60))
 
@@ -134,27 +138,34 @@ func numFormat(value int64) string {
 	return numFormat(value/1000) + "," + fmt.Sprintf("%03d", value%1000)
 }
 
+func outputError(err error) {
+	log.Print(err)
+}
+
 func homeHandler(w http.ResponseWriter, r *http.Request) {
 	funcmap := template.FuncMap{
 		"num": numFormat,
 	}
 	t, err := template.New("home.html").Funcs(funcmap).ParseFiles("templates/home.html")
 	if err != nil {
-		log.Printf("%s\n", err.Error())
+		outputError(err)
 		return
 	}
 	logSetList, err := fetchLogSetList()
 	if err != nil {
-		log.Printf("%v", err.Error())
+		outputError(err)
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
 	if t.Execute(w, map[string]interface{}{"logSetList": logSetList}) != nil {
-		log.Printf("%s", err.Error())
+		outputError(err)
 	}
 }
 
 func getLogSetFromID(logSetID string) (LogSet, error) {
+	if !isValidLogSetID(logSetID) {
+		return LogSet{}, fmt.Errorf("Invalid LogSet ID %s", logSetID)
+	}
 	filename := filepath.Join(perflogs_path, logSetID)
 	f, err := os.Open(filename)
 	defer f.Close()
@@ -172,11 +183,10 @@ func detailHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
-		log.Printf("%s", err.Error())
+		outputError(err)
 		w.WriteHeader(404)
 		return
 	}
-	log.Printf("%v\n", logSet)
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
 	fmt.Fprintf(w, "OK %s", logSet.ID)
@@ -195,7 +205,7 @@ func rawAccessHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
-		log.Printf("%s", err.Error())
+		outputError(err)
 		w.WriteHeader(404)
 		return
 	}
@@ -208,7 +218,7 @@ func rawSqlHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
-		log.Printf("%s", err.Error())
+		outputError(err)
 		w.WriteHeader(404)
 		return
 	}
@@ -255,7 +265,7 @@ func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
-		log.Printf("%s", err.Error())
+		outputError(err)
 		w.WriteHeader(404)
 		return
 	}
@@ -263,7 +273,7 @@ func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-type", "text/plain")
 	err = execCommandFromLogsToWriter(w, logSet.AccessLogs, getKataribePath())
 	if err != nil {
-		log.Printf("%v", err.Error())
+		outputError(err)
 	}
 }
 
@@ -271,7 +281,7 @@ func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	logSet, err := getLogSetFromID(vars["id"])
 	if err != nil {
-		log.Printf("%s", err.Error())
+		outputError(err)
 		w.WriteHeader(404)
 		return
 	}
@@ -279,7 +289,7 @@ func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-type", "text/plain")
 	err = execCommandFromLogsToWriter(w, logSet.SQLLogs, "python3", "parse_log.py")
 	if err != nil {
-		log.Printf("%v", err.Error())
+		outputError(err)
 	}
 }
 
@@ -295,7 +305,7 @@ func main() {
 	perflogs_path = getenv("PERFLOGS_PATH", "logs")
 
 	// Log Start Message
-	log.Printf("Start Perf-Logs-Viewer (port=%s, dir=%s)\n", perflogs_port, perflogs_path)
+	log.Printf("Start Perf-Logs-Viewer (port=%s, dir=%s)", perflogs_port, perflogs_path)
 
 	// Routing Settings
 	router := mux.NewRouter()
