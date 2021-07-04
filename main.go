@@ -60,7 +60,7 @@ func makeLogFile(logfile fs.FileInfo, traceID string, prefix string) (LogFile, b
 	if strings.HasPrefix(logfileName, prefix) && strings.HasSuffix(logfileName, ".log") {
 		filesize := logfile.Size()
 		var code string = logfileName[len(prefix) : len(logfileName)-len(".log")]
-		return LogFile{Code: code, Filename: filepath.Join(perflogs_dir, traceID, logfile.Name()), Size: filesize}, true
+		return LogFile{Code: code, Filename: filepath.Join(perflogs_path, traceID, logfile.Name()), Size: filesize}, true
 	}
 	return LogFile{}, false
 }
@@ -78,7 +78,7 @@ func getTrace(file fs.FileInfo) (Trace, error) {
 	var accessLogTotal int64
 	sqlLogs := []LogFile{}
 	var sqlLogTotal int64
-	logfiles, err := ioutil.ReadDir(filepath.Join(perflogs_dir, traceID))
+	logfiles, err := ioutil.ReadDir(filepath.Join(perflogs_path, traceID))
 	if err != nil {
 		return Trace{}, err
 	}
@@ -106,7 +106,7 @@ func getTrace(file fs.FileInfo) (Trace, error) {
 }
 
 func getTraces() []Trace {
-	files, err := ioutil.ReadDir(perflogs_dir)
+	files, err := ioutil.ReadDir(perflogs_path)
 	if err != nil {
 		panic(err)
 	}
@@ -145,7 +145,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getTraceFromID(traceID string) (Trace, error) {
-	filename := filepath.Join(perflogs_dir, traceID)
+	filename := filepath.Join(perflogs_path, traceID)
 	f, err := os.Open(filename)
 	defer f.Close()
 	if err != nil {
@@ -253,17 +253,17 @@ func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 
 var (
 	perflogs_port string
-	perflogs_dir  string
+	perflogs_path string
 )
 
 func main() {
 
 	// Load Settings
 	perflogs_port = getenv("PERFLOGS_PORT", ":8080")
-	perflogs_dir = getenv("PERFLOGS_DIRN", "logs")
+	perflogs_path = getenv("PERFLOGS_PATH", "logs")
 
 	// Log Start Message
-	log.Printf("Start Perf-Logs-Viewer (port=%s, dir=%s)\n", perflogs_port, perflogs_dir)
+	log.Printf("Start Perf-Logs-Viewer (port=%s, dir=%s)\n", perflogs_port, perflogs_path)
 
 	// Routing Settings
 	router := mux.NewRouter()
