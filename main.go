@@ -231,6 +231,29 @@ func getKataribePath() string {
 	return kataribePath
 }
 
+func cmdExec(w io.Writer, logs []LogFile, name string, arg ...string) error {
+	cmd := exec.Command(name, arg...)
+	pipe, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stdout = w
+	err = cmd.Start()
+	if err != nil {
+		return err
+	}
+	outputLogs(pipe, logs)
+	err = pipe.Close()
+	if err != nil {
+		return err
+	}
+	err = cmd.Wait()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	traceID := vars["code"]
@@ -241,14 +264,25 @@ func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
-	cmd := exec.Command(getKataribePath())
-	pipe, err := cmd.StdinPipe()
-	if err == nil {
-		cmd.Stdout = w
-		cmd.Start()
-		outputLogs(pipe, trace.AccessLogs)
-		pipe.Close()
-		cmd.Wait()
+	err = cmdExec(w, trace.AccessLogs, getKataribePath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+	}
+}
+
+func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	traceID := vars["code"]
+	trace, err := getTraceFromID(traceID)
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+	err = cmdExec(w, trace.SQLLogs, "python3", "parse_log.py")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 	}
 }
 
@@ -273,6 +307,7 @@ func main() {
 	router.HandleFunc("/raw/access/{code}", rawAccessHandler)
 	router.HandleFunc("/raw/sql/{code}", rawSqlHandler)
 	router.HandleFunc("/kataribe/{code}", kataribeHandler)
+	router.HandleFunc("/sqlanalyze/{code}", sqlAnalyzeHandler)
 	router.HandleFunc("/", homeHandler)
 
 	// Start Web App Server
