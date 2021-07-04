@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 )
 
@@ -275,5 +276,6 @@ func main() {
 	router.HandleFunc("/", homeHandler)
 
 	// Start Web App Server
-	log.Fatal(http.ListenAndServe(perflogs_port, router))
+	loggedRouter := handlers.LoggingHandler(os.Stdout, router)
+	log.Fatal(http.ListenAndServe(perflogs_port, loggedRouter))
 }
