@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -210,6 +211,46 @@ func rawSqlHandler(w http.ResponseWriter, r *http.Request) {
 	outputLogs(w, trace.SQLLogs)
 }
 
+func fileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	return err == nil
+}
+
+func getKataribePath() string {
+	kataribePath := os.Getenv("KATARIBE_PATH")
+	if kataribePath != "" {
+		return kataribePath
+	}
+	homePath := os.Getenv("HOME")
+	goPath := os.Getenv("GOPATH")
+	if goPath == "" {
+		goPath = filepath.Join(homePath, "go")
+	}
+	kataribePath = filepath.Join(goPath, "bin", "kataribe")
+	return kataribePath
+}
+
+func kataribeHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	traceID := vars["code"]
+	trace, err := getTraceFromID(traceID)
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+	cmd := exec.Command(getKataribePath())
+	pipe, err := cmd.StdinPipe()
+	if err == nil {
+		cmd.Stdout = w
+		cmd.Start()
+		outputLogs(pipe, trace.AccessLogs)
+		pipe.Close()
+		cmd.Wait()
+	}
+}
+
 var (
 	perflogs_port string
 	perflogs_dir  string
@@ -230,6 +271,7 @@ func main() {
 	router.HandleFunc("/detail/{code}", detailHandler)
 	router.HandleFunc("/raw/access/{code}", rawAccessHandler)
 	router.HandleFunc("/raw/sql/{code}", rawSqlHandler)
+	router.HandleFunc("/kataribe/{code}", kataribeHandler)
 	router.HandleFunc("/", homeHandler)
 
 	// Start Web App Server
