@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"io/ioutil"
 	"log"
@@ -52,19 +54,19 @@ func checkTraceID(v string) bool {
 	return rep.MatchString(v)
 }
 
-func makeLogFile(logfile fs.FileInfo, prefix string) (LogFile, bool) {
+func makeLogFile(logfile fs.FileInfo, traceID string, prefix string) (LogFile, bool) {
 	logfileName := logfile.Name()
 	if strings.HasPrefix(logfileName, prefix) && strings.HasSuffix(logfileName, ".log") {
 		filesize := logfile.Size()
 		var code string = logfileName[len(prefix) : len(logfileName)-len(".log")]
-		return LogFile{Code: code, Filename: logfile.Name(), Size: filesize}, true
+		return LogFile{Code: code, Filename: filepath.Join(perflogs_dir, traceID, logfile.Name()), Size: filesize}, true
 	}
 	return LogFile{}, false
 }
 
-func getTrace(file fs.FileInfo) (Trace, bool) {
+func getTrace(file fs.FileInfo) (Trace, error) {
 	if !checkTraceID(file.Name()) {
-		return Trace{}, false
+		return Trace{}, errors.New("No Trace ID")
 	}
 
 	traceID := file.Name()
@@ -77,14 +79,14 @@ func getTrace(file fs.FileInfo) (Trace, bool) {
 	var sqlLogTotal int64
 	logfiles, err := ioutil.ReadDir(filepath.Join(perflogs_dir, traceID))
 	if err != nil {
-		panic(err)
+		return Trace{}, err
 	}
 	for _, logfile := range logfiles {
-		if accessLog, ok := makeLogFile(logfile, "access"); ok {
+		if accessLog, ok := makeLogFile(logfile, traceID, "access"); ok {
 			accessLogs = append(accessLogs, accessLog)
 			accessLogTotal += accessLog.Size
 		}
-		if sqlLog, ok := makeLogFile(logfile, "sql"); ok {
+		if sqlLog, ok := makeLogFile(logfile, traceID, "sql"); ok {
 			sqlLogs = append(sqlLogs, sqlLog)
 			sqlLogTotal += sqlLog.Size
 		}
@@ -99,7 +101,7 @@ func getTrace(file fs.FileInfo) (Trace, bool) {
 		SQLLogs:        sqlLogs,
 	}
 
-	return trace, true
+	return trace, nil
 }
 
 func getTraces() []Trace {
@@ -109,7 +111,7 @@ func getTraces() []Trace {
 	}
 	traceList := []Trace{}
 	for _, file := range files {
-		if trace, ok := getTrace(file); ok {
+		if trace, err := getTrace(file); err == nil {
 			traceList = append(traceList, trace)
 		}
 	}
@@ -141,22 +143,71 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func detailHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	tradeID := vars["code"]
-	filename := filepath.Join(perflogs_dir, tradeID)
+func getTraceFromID(traceID string) (Trace, error) {
+	filename := filepath.Join(perflogs_dir, traceID)
 	f, err := os.Open(filename)
 	defer f.Close()
 	if err != nil {
+		return Trace{}, err
+	}
+	if fs, err := f.Stat(); err != nil {
+		return Trace{}, err
+	} else {
+		return getTrace(fs)
+	}
+}
 
+func detailHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	traceID := vars["code"]
+	trace, err := getTraceFromID(traceID)
+	if err != nil {
+		w.WriteHeader(404)
+		return
 	}
-	if fs, err := f.Stat(); err == nil {
-		trace, ok := getTrace(fs)
-		log.Printf("%v %v\n", ok, trace)
-	}
+	log.Printf("%v\n", trace)
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	fmt.Fprintf(w, "OK %s", tradeID)
+	fmt.Fprintf(w, "OK %s", trace.ID)
+}
+
+func outputLogs(w io.Writer, logs []LogFile) {
+	for _, log := range logs {
+		fp, err := os.Open(log.Filename)
+		defer fp.Close()
+		if err == nil {
+			buf, err := ioutil.ReadAll(fp)
+			if err == nil {
+				w.Write(buf)
+			}
+		}
+	}
+}
+
+func rawAccessHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	traceID := vars["code"]
+	trace, err := getTraceFromID(traceID)
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+	outputLogs(w, trace.AccessLogs)
+}
+
+func rawSqlHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	traceID := vars["code"]
+	trace, err := getTraceFromID(traceID)
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+	outputLogs(w, trace.SQLLogs)
 }
 
 var (
@@ -177,6 +228,8 @@ func main() {
 	router := mux.NewRouter()
 	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 	router.HandleFunc("/detail/{code}", detailHandler)
+	router.HandleFunc("/raw/access/{code}", rawAccessHandler)
+	router.HandleFunc("/raw/sql/{code}", rawSqlHandler)
 	router.HandleFunc("/", homeHandler)
 
 	// Start Web App Server
