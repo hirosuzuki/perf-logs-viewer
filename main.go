@@ -187,9 +187,19 @@ func detailHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		return
 	}
+	funcmap := template.FuncMap{
+		"num": numFormat,
+	}
+	t, err := template.New("detail.html").Funcs(funcmap).ParseFiles("templates/detail.html")
+	if err != nil {
+		outputError(err)
+		return
+	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	fmt.Fprintf(w, "OK %s", logSet.ID)
+	if t.Execute(w, map[string]interface{}{"logSet": logSet}) != nil {
+		outputError(err)
+	}
 }
 
 func outputLogs(w io.Writer, logs []LogFile) {

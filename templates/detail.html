@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/static/favicon.png" sizes="16x16 24x24 32x32 48x48 64x64" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bulma@0.9.3/css/bulma.min.css"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <div class="columns">
+        <div class="column is-four-fifths mt-2 mb-2">
+          <h1 class="is-size-4">Perf Logs Viewer</h1>
+        </div>
+      </div>
+      <table class="table is-hoverable is-fullwidth">
+        <tr>
+          <th>ID</th>
+          <td>{{ .logSet.ID }}</td>
+        </tr>
+        <tr>
+          <th>ExecAt</th>
+          <td>{{ .logSet.ExecAt }}</td>
+        </tr>
+        <tr>
+          <th>AccessLog</th>
+          <td>
+            {{ range $log := .logSet.AccessLogs }}
+            {{ $log.Filename }} ({{ num $log.Size }} bytes)<br/>
+            {{ end }}
+          </td>
+        </tr>
+        <tr>
+          <th>SQLLogs</th>
+          <td>
+            {{ range $log := .logSet.SQLLogs }}
+            {{ $log.Filename }} ({{ num $log.Size }} bytes)<br/>
+            {{ end }}
+          </td>
+        </tr>
+      </table>
+    </div>
+  </body>
+</html>
