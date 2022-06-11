@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"html/template"
 	"io"
@@ -54,9 +55,7 @@ func makeLogFile(logfile fs.FileInfo, logSetID string, prefix string) (LogFile, 
 	name := logfile.Name()
 	if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".log") {
 		code := name[len(prefix) : len(name)-len(".log")]
-		if strings.HasPrefix(code, "-") {
-			code = code[1:]
-		}
+		code = strings.TrimPrefix(code, "-")
 		return LogFile{Code: code, Filename: filepath.Join(perflogs_path, logSetID, name), Size: logfile.Size()}, true
 	}
 	return LogFile{}, false
@@ -70,13 +69,13 @@ func fetchLogSet(file fs.FileInfo) (LogSet, error) {
 	// ファイル名のチェック
 	logSetID := file.Name()
 	if !isValidLogSetID(logSetID) {
-		return LogSet{}, fmt.Errorf("Invalid LogSet ID %s", logSetID)
+		return LogSet{}, fmt.Errorf("invalid logSet ID %s", logSetID)
 	}
 
 	// ファイル名から実行時間を算出
 	execAt, err := time.Parse("20060102-150405", logSetID)
 	if err != nil {
-		return LogSet{}, fmt.Errorf("Invalid LogSet ID %s", logSetID)
+		return LogSet{}, fmt.Errorf("invalid logSet ID %s", logSetID)
 	}
 	execAt = execAt.In(time.FixedZone("Asia/Tokyo", 9*60*60))
 
@@ -164,14 +163,14 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 
 func getLogSetFromID(logSetID string) (LogSet, error) {
 	if !isValidLogSetID(logSetID) {
-		return LogSet{}, fmt.Errorf("Invalid LogSet ID %s", logSetID)
+		return LogSet{}, fmt.Errorf("invalid logSet ID %s", logSetID)
 	}
 	filename := filepath.Join(perflogs_path, logSetID)
 	f, err := os.Open(filename)
-	defer f.Close()
 	if err != nil {
 		return LogSet{}, err
 	}
+	defer f.Close()
 	if fs, err := f.Stat(); err != nil {
 		return LogSet{}, err
 	} else {
@@ -287,6 +286,116 @@ func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type QueryRec struct {
+	totalTime   int
+	count       int
+	averageTime int
+	content     string
+}
+
+func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
+	query_count := make(map[string]int)
+	query_time := make(map[string]int)
+	tag_count := make(map[string]int)
+	tag_time := make(map[string]int)
+	for _, log := range logFiles {
+		fp, err := os.Open(log.Filename)
+		if err != nil {
+			return err
+		}
+		defer fp.Close()
+		scanner := bufio.NewScanner(fp)
+		for scanner.Scan() {
+			line := scanner.Text()
+			vs := strings.Split(line, "\t")
+			deltatime, _ := strconv.Atoi(vs[1])
+			tagname := ""
+			query := vs[2]
+			if len(vs) >= 4 {
+				tagname = vs[2]
+				query = vs[3]
+			}
+			query_count[query] += 1
+			query_time[query] += deltatime
+			tag_count[tagname] += 1
+			tag_time[tagname] += deltatime
+		}
+		if err := scanner.Err(); err != nil {
+			return err
+		}
+	}
+
+	queryRecList := make([]QueryRec, 0)
+	for k := range query_count {
+		queryRecList = append(queryRecList, QueryRec{
+			content:     k,
+			count:       query_count[k],
+			totalTime:   query_time[k],
+			averageTime: query_time[k] / query_count[k]})
+	}
+
+	convertValues := func(q QueryRec) []string {
+		return []string{
+			fmt.Sprintf("%.3f", float64(q.totalTime)/1000000),
+			fmt.Sprintf("%d", q.count),
+			fmt.Sprintf("%.3f", float64(q.averageTime)/1000000),
+			q.content,
+		}
+	}
+
+	titles := []string{"total(ms)", "count", "average(ms)", "content"}
+	fmts := []string{"%*s", "%*s", "%*s", "%-*s"}
+	widths := make([]int, len(titles))
+	for i, t := range titles {
+		widths[i] = len(t)
+	}
+	for _, q := range queryRecList {
+		for i, v := range convertValues(q) {
+			if widths[i] < len(v) {
+				widths[i] = len(v)
+			}
+		}
+	}
+
+	outputValues := func(w io.Writer, values []string, splitter string, widths []int, formats []string) {
+		for i := 0; i < len(values)-1; i++ {
+			fmt.Fprintf(w, fmts[i], widths[i], values[i])
+			fmt.Fprint(w, splitter)
+		}
+		fmt.Fprintln(w, values[len(values)-1])
+	}
+
+	outputSection := func(sectionTitle string, sortFunc func(i int, j int) bool) {
+		sort.Slice(queryRecList, sortFunc)
+		fmt.Fprint(w, sectionTitle, "\n\n")
+		outputValues(w, titles, " | ", widths, fmts)
+		lines := make([]string, 0)
+		for _, v := range widths {
+			lines = append(lines, strings.Repeat("-", v))
+		}
+		outputValues(w, lines, "-+-", widths, fmts)
+
+		for _, q := range queryRecList {
+			outputValues(w, convertValues(q), " | ", widths, fmts)
+		}
+		fmt.Fprint(w, "\n")
+	}
+
+	outputSection("# Top Query (総時間順)", func(i int, j int) bool {
+		return queryRecList[i].totalTime > queryRecList[j].totalTime
+	})
+
+	outputSection("# Top Query (回数順)", func(i int, j int) bool {
+		return queryRecList[i].count > queryRecList[j].count
+	})
+
+	outputSection("# Top Query (平均時間順)", func(i int, j int) bool {
+		return queryRecList[i].averageTime > queryRecList[j].averageTime
+	})
+
+	return nil
+}
+
 func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	logSet, err := getLogSetFromID(vars["id"])
@@ -297,7 +406,8 @@ func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
-	err = execCommandFromLogsToWriter(w, logSet.SQLLogs, "python3", "parse_log.py")
+	//err = execCommandFromLogsToWriter(w, logSet.SQLLogs, "python3", "parse_log.py")
+	err = analyzeSQLLogs(w, logSet.SQLLogs)
 	if err != nil {
 		outputError(err)
 	}
