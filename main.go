@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"embed"
 	"fmt"
 	"html/template"
 	"io"
@@ -22,11 +23,11 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var (
-	version  string
-	revision string
-	build    string
-)
+//go:embed templates
+var templateFs embed.FS
+
+//go:embed static
+var staticFs embed.FS
 
 func getenv(key string, defaultValue string) string {
 	ret := os.Getenv(key)
@@ -145,7 +146,7 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 	funcmap := template.FuncMap{
 		"num": numFormat,
 	}
-	t, err := template.New("home.html").Funcs(funcmap).ParseFiles("templates/home.html")
+	t, err := template.New("home.html").Funcs(funcmap).ParseFS(templateFs, "templates/home.html")
 	if err != nil {
 		outputError(err)
 		return
@@ -189,7 +190,7 @@ func detailHandler(w http.ResponseWriter, r *http.Request) {
 	funcmap := template.FuncMap{
 		"num": numFormat,
 	}
-	t, err := template.New("detail.html").Funcs(funcmap).ParseFiles("templates/detail.html")
+	t, err := template.New("detail.html").Funcs(funcmap).ParseFS(templateFs, "templates/detail.html")
 	if err != nil {
 		outputError(err)
 		return
@@ -429,13 +430,19 @@ func main() {
 
 	// Routing Settings
 	router := mux.NewRouter()
-	router.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+	router.PathPrefix("/static/").Handler(http.FileServer(http.FS(staticFs)))
 	router.HandleFunc("/detail/{id}", detailHandler)
 	router.HandleFunc("/raw/access/{id}", rawAccessHandler)
 	router.HandleFunc("/raw/sql/{id}", rawSqlHandler)
 	router.HandleFunc("/kataribe/{id}", kataribeHandler)
 	router.HandleFunc("/sqlanalyze/{id}", sqlAnalyzeHandler)
 	router.HandleFunc("/", homeHandler)
+
+	// Open Browser
+	browser, ok := os.LookupEnv("BROWSER")
+	if ok && browser != "" {
+		exec.Command(browser, "http://localhost"+perflogs_port).Start()
+	}
 
 	// Start Web App Server
 	loggedRouter := handlers.LoggingHandler(os.Stdout, router)
