@@ -23,10 +23,11 @@
             <th rowspan="1">ID</th>
             <th rowspan="1">Start Request</th>
         </tr>
+        {{ $root := . }}
         {{ range $uid := .UIDList }}
         <tr>
             <td rowspan="1">{{ $uid.Times }}</td>
-            <td rowspan="1">{{ $uid.ID }}</td>
+            <td rowspan="1"><a href="/uid/{{ $root.LogSet.ID }}/{{ $uid.ID }}">{{ $uid.ID }}</a></td>
             <td rowspan="1">{{ $uid.Request }}</td>
         </tr>
         {{ end }}

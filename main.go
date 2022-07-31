@@ -278,6 +278,12 @@ func uidListHandler(w http.ResponseWriter, r *http.Request) {
 
 	funcmap := template.FuncMap{
 		"num": numFormat,
+		"safe": func(s string) template.HTML {
+			return template.HTML(s)
+		},
+		"attr": func(s string) template.HTMLAttr {
+			return template.HTMLAttr(s)
+		},
 	}
 	t, err := template.New("uidlist.html").Funcs(funcmap).ParseFS(templateFs, "templates/uidlist.html")
 	if err != nil {
@@ -286,8 +292,44 @@ func uidListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	if t.Execute(w, map[string]interface{}{"UIDList": uidList}) != nil {
+	if t.Execute(w, map[string]interface{}{"LogSet": logSet, "UIDList": uidList}) != nil {
 		outputError(err)
+	}
+}
+
+func uidHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	logSet, err := getLogSetFromID(vars["id"])
+	uid := vars["uid"]
+	if err != nil {
+		outputError(err)
+		w.WriteHeader(404)
+		return
+	}
+
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+
+	for _, log := range logSet.AccessLogs {
+		fp, err := os.Open(log.Filename)
+		if err != nil {
+			continue
+		}
+		defer fp.Close()
+		scanner := bufio.NewScanner(fp)
+		for scanner.Scan() {
+			line := scanner.Text()
+			vs := strings.SplitN(line, " ", 4)
+			if len(vs) < 4 {
+				continue
+			}
+			if vs[1] == uid {
+				fmt.Fprintln(w, line)
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			continue
+		}
 	}
 }
 
@@ -523,6 +565,7 @@ func main() {
 	router.HandleFunc("/raw/sql/{id}", rawSqlHandler)
 	router.HandleFunc("/kataribe/{id}", kataribeHandler)
 	router.HandleFunc("/uid/{id}", uidListHandler)
+	router.HandleFunc("/uid/{id}/{uid}", uidHandler)
 	router.HandleFunc("/sqlanalyze/{id}", sqlAnalyzeHandler)
 	router.HandleFunc("/", homeHandler)
 
