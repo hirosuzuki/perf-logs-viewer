@@ -224,6 +224,73 @@ func rawAccessHandler(w http.ResponseWriter, r *http.Request) {
 	outputLogs(w, logSet.AccessLogs)
 }
 
+type UID struct {
+	ID      string
+	Times   int
+	Request string
+}
+
+func uidListHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	logSet, err := getLogSetFromID(vars["id"])
+	if err != nil {
+		outputError(err)
+		w.WriteHeader(404)
+		return
+	}
+
+	uidSet := make(map[string]*UID)
+	uidList := make([]*UID, 0)
+
+	for _, log := range logSet.AccessLogs {
+		fp, err := os.Open(log.Filename)
+		if err != nil {
+			continue
+		}
+		defer fp.Close()
+		scanner := bufio.NewScanner(fp)
+		for scanner.Scan() {
+			line := scanner.Text()
+			vs := strings.SplitN(line, " ", 4)
+			if len(vs) < 4 {
+				continue
+			}
+			uid := vs[1]
+			if uid == "-" {
+				continue
+			}
+			u := uidSet[uid]
+			if u == nil {
+				u = &UID{
+					ID:      uid,
+					Times:   0,
+					Request: vs[3],
+				}
+				uidList = append(uidList, u)
+				uidSet[uid] = u
+			}
+			u.Times++
+		}
+		if err := scanner.Err(); err != nil {
+			continue
+		}
+	}
+
+	funcmap := template.FuncMap{
+		"num": numFormat,
+	}
+	t, err := template.New("uidlist.html").Funcs(funcmap).ParseFS(templateFs, "templates/uidlist.html")
+	if err != nil {
+		outputError(err)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/html")
+	if t.Execute(w, map[string]interface{}{"UIDList": uidList}) != nil {
+		outputError(err)
+	}
+}
+
 func rawSqlHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	logSet, err := getLogSetFromID(vars["id"])
@@ -455,6 +522,7 @@ func main() {
 	router.HandleFunc("/raw/access/{id}", rawAccessHandler)
 	router.HandleFunc("/raw/sql/{id}", rawSqlHandler)
 	router.HandleFunc("/kataribe/{id}", kataribeHandler)
+	router.HandleFunc("/uid/{id}", uidListHandler)
 	router.HandleFunc("/sqlanalyze/{id}", sqlAnalyzeHandler)
 	router.HandleFunc("/", homeHandler)
 
