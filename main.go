@@ -291,14 +291,17 @@ type QueryRec struct {
 	totalTime   int
 	count       int
 	averageTime int
+	p50         int
+	p90         int
+	p99         int
+	max         int
 	content     string
 }
 
 func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
 	query_count := make(map[string]int)
 	query_time := make(map[string]int)
-	tag_count := make(map[string]int)
-	tag_time := make(map[string]int)
+	query_times := make(map[string][]int)
 	for _, log := range logFiles {
 		fp, err := os.Open(log.Filename)
 		if err != nil {
@@ -310,29 +313,42 @@ func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
 			line := scanner.Text()
 			vs := strings.Split(line, "\t")
 			deltatime, _ := strconv.Atoi(vs[1])
-			tagname := ""
 			query := vs[2]
 			if len(vs) >= 4 {
-				tagname = vs[2]
 				query = vs[3]
 			}
 			query_count[query] += 1
 			query_time[query] += deltatime
-			tag_count[tagname] += 1
-			tag_time[tagname] += deltatime
+			_, ok := query_times[query]
+			if !ok {
+				query_times[query] = make([]int, 0)
+			}
+			query_times[query] = append(query_times[query], deltatime)
 		}
 		if err := scanner.Err(); err != nil {
 			return err
 		}
 	}
 
+	for query := range query_times {
+		sort.Slice(query_times[query], func(i int, j int) bool {
+			return query_times[query][i] < query_times[query][j]
+		})
+	}
+
 	queryRecList := make([]QueryRec, 0)
 	for k := range query_count {
+		times := query_times[k]
 		queryRecList = append(queryRecList, QueryRec{
 			content:     k,
 			count:       query_count[k],
 			totalTime:   query_time[k],
-			averageTime: query_time[k] / query_count[k]})
+			p50:         times[(len(times)-1)*50/100],
+			p90:         times[(len(times)-1)*90/100],
+			p99:         times[(len(times)-1)*99/100],
+			max:         times[(len(times)-1)*100/100],
+			averageTime: query_time[k] / query_count[k],
+		})
 	}
 
 	convertValues := func(q QueryRec) []string {
@@ -340,12 +356,16 @@ func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
 			fmt.Sprintf("%.3f", float64(q.totalTime)/1000000),
 			fmt.Sprintf("%d", q.count),
 			fmt.Sprintf("%.3f", float64(q.averageTime)/1000000),
+			fmt.Sprintf("%.3f", float64(q.p50)/1000000),
+			fmt.Sprintf("%.3f", float64(q.p90)/1000000),
+			fmt.Sprintf("%.3f", float64(q.p99)/1000000),
+			fmt.Sprintf("%.3f", float64(q.max)/1000000),
 			q.content,
 		}
 	}
 
-	titles := []string{"total(ms)", "count", "average(ms)", "content"}
-	fmts := []string{"%*s", "%*s", "%*s", "%-*s"}
+	titles := []string{"total(ms)", "count", "avg(ms)", "P50", "P90", "P99", "MAX", "content"}
+	fmts := []string{"%*s", "%*s", "%*s", "%*s", "%*s", "%*s", "%*s", "%-*s"}
 	widths := make([]int, len(titles))
 	for i, t := range titles {
 		widths[i] = len(t)
