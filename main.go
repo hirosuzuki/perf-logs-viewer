@@ -397,14 +397,14 @@ func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type QueryRec struct {
-	totalTime   int
-	count       int
-	averageTime int
-	p50         int
-	p90         int
-	p99         int
-	max         int
-	content     string
+	TotalTime   int
+	Count       int
+	AverageTime int
+	P50         int
+	P90         int
+	P99         int
+	Max         int
+	Content     string
 }
 
 func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
@@ -449,27 +449,27 @@ func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
 	for k := range query_count {
 		times := query_times[k]
 		queryRecList = append(queryRecList, QueryRec{
-			content:     k,
-			count:       query_count[k],
-			totalTime:   query_time[k],
-			p50:         times[(len(times)-1)*50/100],
-			p90:         times[(len(times)-1)*90/100],
-			p99:         times[(len(times)-1)*99/100],
-			max:         times[(len(times)-1)*100/100],
-			averageTime: query_time[k] / query_count[k],
+			Content:     k,
+			Count:       query_count[k],
+			TotalTime:   query_time[k],
+			P50:         times[(len(times)-1)*50/100],
+			P90:         times[(len(times)-1)*90/100],
+			P99:         times[(len(times)-1)*99/100],
+			Max:         times[(len(times)-1)*100/100],
+			AverageTime: query_time[k] / query_count[k],
 		})
 	}
 
 	convertValues := func(q QueryRec) []string {
 		return []string{
-			fmt.Sprintf("%.3f", float64(q.totalTime)/1000000),
-			fmt.Sprintf("%d", q.count),
-			fmt.Sprintf("%.3f", float64(q.averageTime)/1000000),
-			fmt.Sprintf("%.3f", float64(q.p50)/1000000),
-			fmt.Sprintf("%.3f", float64(q.p90)/1000000),
-			fmt.Sprintf("%.3f", float64(q.p99)/1000000),
-			fmt.Sprintf("%.3f", float64(q.max)/1000000),
-			q.content,
+			fmt.Sprintf("%.3f", float64(q.TotalTime)/1000000),
+			fmt.Sprintf("%d", q.Count),
+			fmt.Sprintf("%.3f", float64(q.AverageTime)/1000000),
+			fmt.Sprintf("%.3f", float64(q.P50)/1000000),
+			fmt.Sprintf("%.3f", float64(q.P90)/1000000),
+			fmt.Sprintf("%.3f", float64(q.P99)/1000000),
+			fmt.Sprintf("%.3f", float64(q.Max)/1000000),
+			q.Content,
 		}
 	}
 
@@ -512,15 +512,15 @@ func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
 	}
 
 	outputSection("# Top Query (総時間順)", func(i int, j int) bool {
-		return queryRecList[i].totalTime > queryRecList[j].totalTime
+		return queryRecList[i].TotalTime > queryRecList[j].TotalTime
 	})
 
 	outputSection("# Top Query (回数順)", func(i int, j int) bool {
-		return queryRecList[i].count > queryRecList[j].count
+		return queryRecList[i].Count > queryRecList[j].Count
 	})
 
 	outputSection("# Top Query (平均時間順)", func(i int, j int) bool {
-		return queryRecList[i].averageTime > queryRecList[j].averageTime
+		return queryRecList[i].AverageTime > queryRecList[j].AverageTime
 	})
 
 	return nil
@@ -541,6 +541,87 @@ func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		outputError(err)
 	}
+}
+
+func sqlAnalyzeHtmlHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	logSet, err := getLogSetFromID(vars["id"])
+	if err != nil {
+		outputError(err)
+		w.WriteHeader(404)
+		return
+	}
+
+	query_count := make(map[string]int)
+	query_time := make(map[string]int)
+	query_times := make(map[string][]int)
+	for _, log := range logSet.SQLLogs {
+		fp, err := os.Open(log.Filename)
+		if err != nil {
+			continue
+		}
+		defer fp.Close()
+		scanner := bufio.NewScanner(fp)
+		for scanner.Scan() {
+			line := scanner.Text()
+			vs := strings.Split(line, "\t")
+			deltatime, _ := strconv.Atoi(vs[1])
+			query := vs[2]
+			if len(vs) >= 4 {
+				query = vs[3]
+			}
+			query_count[query] += 1
+			query_time[query] += deltatime
+			_, ok := query_times[query]
+			if !ok {
+				query_times[query] = make([]int, 0)
+			}
+			query_times[query] = append(query_times[query], deltatime)
+		}
+	}
+
+	for query := range query_times {
+		sort.Slice(query_times[query], func(i int, j int) bool {
+			return query_times[query][i] < query_times[query][j]
+		})
+	}
+
+	queryRecList := make([]QueryRec, 0)
+	for k := range query_count {
+		times := query_times[k]
+		queryRecList = append(queryRecList, QueryRec{
+			Content:     k,
+			Count:       query_count[k],
+			TotalTime:   query_time[k],
+			P50:         times[(len(times)-1)*50/100],
+			P90:         times[(len(times)-1)*90/100],
+			P99:         times[(len(times)-1)*99/100],
+			Max:         times[(len(times)-1)*100/100],
+			AverageTime: query_time[k] / query_count[k],
+		})
+	}
+
+	sort.SliceStable(queryRecList, func(i int, j int) bool {
+		return queryRecList[i].TotalTime > queryRecList[j].TotalTime
+	})
+
+	funcmap := template.FuncMap{
+		"num": numFormat,
+		"float3": func(v int) string {
+			return fmt.Sprintf("%.3f", float64(v)/1000000)
+		},
+	}
+	t, err := template.New("sqlanalyze.html").Funcs(funcmap).ParseFS(templateFs, "templates/sqlanalyze.html")
+	if err != nil {
+		outputError(err)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/html")
+	if t.Execute(w, map[string]interface{}{"QueryList": queryRecList}) != nil {
+		outputError(err)
+	}
+
 }
 
 var (
@@ -567,6 +648,7 @@ func main() {
 	router.HandleFunc("/uid/{id}", uidListHandler)
 	router.HandleFunc("/uid/{id}/{uid}", uidHandler)
 	router.HandleFunc("/sqlanalyze/{id}", sqlAnalyzeHandler)
+	router.HandleFunc("/sqlanalyze/html/{id}", sqlAnalyzeHtmlHandler)
 	router.HandleFunc("/", homeHandler)
 
 	// Open Browser
