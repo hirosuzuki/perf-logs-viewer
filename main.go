@@ -55,19 +55,11 @@ type LogFile struct {
 const LOGSET_JSON_VERSION = "1.0"
 
 type LogSet struct {
-	Version        string `json:"ver"`
-	ID             string `json:"id"`
-	ExecAt         time.Time
-	AccessLogs     []LogFile
-	AccessLogTotal int64
-	SQLLogs        []LogFile
-	SQLLogTotal    int64
-	AppLogs        []LogFile
-	AppLogTotal    int64
-	SlowLogs       []LogFile
-	SlowLogTotal   int64
-	LogSet         map[string]([]LogFile)
-	LogTotal       map[string]int64
+	Version  string `json:"ver"`
+	ID       string `json:"id"`
+	ExecAt   time.Time
+	LogSet   map[string]([]LogFile)
+	LogTotal map[string]int64
 }
 
 func makeLogFile(logfile fs.FileInfo, logSetID string, prefix string) (LogFile, bool) {
@@ -130,16 +122,6 @@ func fetchLogSet(file fs.FileInfo) (LogSet, error) {
 			}
 		}
 	}
-
-	// 互換性のため残す
-	result.AccessLogs = result.LogSet["web"]
-	result.AccessLogTotal = result.LogTotal["web"]
-	result.SQLLogs = result.LogSet["sql"]
-	result.SQLLogTotal = result.LogTotal["sql"]
-	result.AppLogs = result.LogSet["app"]
-	result.AppLogTotal = result.LogTotal["app"]
-	result.SlowLogs = result.LogSet["slow"]
-	result.SlowLogTotal = result.LogTotal["slow"]
 
 	// ログファイル一覧の情報をJSON形式で保存
 	result_json, err := json.Marshal(result)
@@ -263,7 +245,7 @@ func uidListHandler(w http.ResponseWriter, r *http.Request) {
 	uidSet := make(map[string]*UID)
 	uidList := make([]*UID, 0)
 
-	for _, log := range logSet.AccessLogs {
+	for _, log := range logSet.LogSet["web"] {
 		fp, err := os.Open(log.Filename)
 		if err != nil {
 			continue
@@ -317,7 +299,7 @@ func uidQueryHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
 
-	for _, log := range logSet.AccessLogs {
+	for _, log := range logSet.LogSet["web"] {
 		fp, err := os.Open(log.Filename)
 		if err != nil {
 			continue
@@ -541,7 +523,7 @@ func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
-	err = analyzeSQLLogs(w, logSet.SQLLogs)
+	err = analyzeSQLLogs(w, logSet.LogSet["sql"])
 	if err != nil {
 		outputError(err)
 	}
@@ -556,7 +538,7 @@ func sqlAnalyzeHtmlHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queryRecList := analyzeSQLLog(logSet.SQLLogs)
+	queryRecList := analyzeSQLLog(logSet.LogSet["sql"])
 
 	sort.SliceStable(queryRecList, func(i int, j int) bool {
 		return queryRecList[i].TotalTime > queryRecList[j].TotalTime
