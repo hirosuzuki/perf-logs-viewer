@@ -28,7 +28,7 @@
         <tr>
           <th>AccessLog</th>
           <td>
-            {{ range $log := .logSet.AccessLogs }}
+            {{ range $log := .logSet.LogSet.web }}
             {{ $log.Filename }} ({{ num $log.Size }} bytes)<br/>
             {{ end }}
           </td>
@@ -36,7 +36,7 @@
         <tr>
           <th>SQLLogs</th>
           <td>
-            {{ range $log := .logSet.SQLLogs }}
+            {{ range $log := .logSet.LogSet.sql }}
             {{ $log.Filename }} ({{ num $log.Size }} bytes)<br/>
             {{ end }}
           </td>
@@ -44,7 +44,7 @@
         <tr>
           <th>AppLogs</th>
           <td>
-            {{ range $log := .logSet.AppLogs }}
+            {{ range $log := .logSet.LogSet.app }}
             {{ $log.Filename }} ({{ num $log.Size }} bytes)<br/>
             {{ end }}
           </td>
@@ -52,7 +52,7 @@
         <tr>
           <th>SlowLogs</th>
           <td>
-            {{ range $log := .logSet.SlowLogs }}
+            {{ range $log := .logSet.LogSet.slow }}
             {{ $log.Filename }} ({{ num $log.Size }} bytes)<br/>
             {{ end }}
           </td>

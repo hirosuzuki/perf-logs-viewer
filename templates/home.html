@@ -23,24 +23,24 @@
         <tr>
           <td ><a href="/detail/{{ $logSet.ID }}">{{ $logSet.ID }}</a></td>
           <td >{{ $logSet.ExecAt.Format "2006-01-02 15:04:05" }}</td>
-          <td class="has-text-right">{{ num $logSet.AccessLogTotal }} bytes</td>
+          <td class="has-text-right">{{ num $logSet.LogTotal.web }} bytes</td>
           <td>
             <a href="/raw/access/{{ $logSet.ID }}">Raw</a>
             <a href="/uid/{{ $logSet.ID }}">UID</a>
             <a href="/kataribe/{{ $logSet.ID }}">Kataribe</a>
           </td>
-          <td class="has-text-right">{{ num $logSet.SQLLogTotal }} bytes</td>
+          <td class="has-text-right">{{ num $logSet.LogTotal.sql }} bytes</td>
           <td>
             <a href="/raw/sql/{{ $logSet.ID }}">Raw</a>
             <a href="/sqlanalyze/html/{{ $logSet.ID }}">Total</a>
             <a href="/sqlanalyze/{{ $logSet.ID }}">Analyze</a>
           </td>
-          <td class="has-text-right">{{ num $logSet.AppLogTotal }} bytes</td>
+          <td class="has-text-right">{{ num $logSet.LogTotal.app }} bytes</td>
           <td>
             <a href="/raw/app/{{ $logSet.ID }}">Raw</a>
             <a href="/kataribe-app/{{ $logSet.ID }}">Kataribe</a>
           </td>
-          <td class="has-text-right">{{ num $logSet.SlowLogTotal }} bytes</td>
+          <td class="has-text-right">{{ num $logSet.LogTotal.slow }} bytes</td>
           <td>
             <a href="/raw/slow/{{ $logSet.ID }}">Raw</a>
             <a href="/query-digest/{{ $logSet.ID }}">Digest</a>

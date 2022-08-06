@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -29,6 +30,13 @@ var templateFs embed.FS
 //go:embed static
 var staticFs embed.FS
 
+var LogMap map[string]string = map[string]string{
+	"web":  "access-",
+	"app":  "app-",
+	"sql":  "sql-",
+	"slow": "mysql-slow-",
+}
+
 func getenv(key string, defaultValue string) string {
 	ret := os.Getenv(key)
 	if ret == "" {
@@ -41,9 +49,13 @@ type LogFile struct {
 	Code     string
 	Filename string
 	Size     int64
+	FileSize int64
 }
 
+const LOGSET_JSON_VERSION = "1.0"
+
 type LogSet struct {
+	Version        string `json:"ver"`
 	ID             string `json:"id"`
 	ExecAt         time.Time
 	AccessLogs     []LogFile
@@ -54,6 +66,8 @@ type LogSet struct {
 	AppLogTotal    int64
 	SlowLogs       []LogFile
 	SlowLogTotal   int64
+	LogSet         map[string]([]LogFile)
+	LogTotal       map[string]int64
 }
 
 func makeLogFile(logfile fs.FileInfo, logSetID string, prefix string) (LogFile, bool) {
@@ -82,54 +96,59 @@ func fetchLogSet(file fs.FileInfo) (LogSet, error) {
 	if err != nil {
 		return LogSet{}, fmt.Errorf("invalid logSet ID %s", logSetID)
 	}
+
+	// UTC -> JST 変換
 	execAt = execAt.In(time.FixedZone("Asia/Tokyo", 9*60*60))
 
-	accessLogs := []LogFile{}
-	sqlLogs := []LogFile{}
-	appLogs := []LogFile{}
-	slowLogs := []LogFile{}
+	// ログフォルダ情報設定
+	logfiles_dir := filepath.Join(perflogs_path, logSetID)
+	logfiles_json := filepath.Join(logfiles_dir, "info.json")
 
-	// ログファイルの収集
-	logfiles, err := ioutil.ReadDir(filepath.Join(perflogs_path, logSetID))
-	if err != nil {
-		return LogSet{}, err
-	}
-	for _, logfile := range logfiles {
-		if accessLog, ok := makeLogFile(logfile, logSetID, "access"); ok {
-			accessLogs = append(accessLogs, accessLog)
-		}
-		if sqlLog, ok := makeLogFile(logfile, logSetID, "sql"); ok {
-			sqlLogs = append(sqlLogs, sqlLog)
-		}
-		if appLog, ok := makeLogFile(logfile, logSetID, "app"); ok {
-			appLogs = append(appLogs, appLog)
-		}
-		if slowLog, ok := makeLogFile(logfile, logSetID, "mysql-slow"); ok {
-			slowLogs = append(slowLogs, slowLog)
-		}
+	// ログ一覧情報の初期化
+	result := LogSet{
+		Version:  LOGSET_JSON_VERSION,
+		ID:       logSetID,
+		ExecAt:   execAt,
+		LogSet:   map[string][]LogFile{},
+		LogTotal: map[string]int64{},
 	}
 
-	// ファイルサイズの合計計算関数
-	calcTotalFileSize := func(logs []LogFile) int64 {
-		var result int64
-		for _, log := range logs {
-			result += log.Size
-		}
-		return result
+	for key := range LogMap {
+		result.LogSet[key] = make([]LogFile, 0)
+		result.LogTotal[key] = 0
 	}
 
-	return LogSet{
-		ID:             logSetID,
-		ExecAt:         execAt,
-		AccessLogTotal: calcTotalFileSize(accessLogs),
-		AccessLogs:     accessLogs,
-		SQLLogTotal:    calcTotalFileSize(sqlLogs),
-		SQLLogs:        sqlLogs,
-		AppLogTotal:    calcTotalFileSize(appLogs),
-		AppLogs:        appLogs,
-		SlowLogTotal:   calcTotalFileSize(slowLogs),
-		SlowLogs:       slowLogs,
-	}, nil
+	// フォルダ内を検索してログ一覧情報を更新
+	if logfiles, err := ioutil.ReadDir(logfiles_dir); err == nil {
+		for _, logfile := range logfiles {
+			for key, prefix := range LogMap {
+				if log, ok := makeLogFile(logfile, logSetID, prefix); ok {
+					result.LogSet[key] = append(result.LogSet[key], log)
+					result.LogTotal[key] += log.Size
+					break
+				}
+			}
+		}
+	}
+
+	// 互換性のため残す
+	result.AccessLogs = result.LogSet["web"]
+	result.AccessLogTotal = result.LogTotal["web"]
+	result.SQLLogs = result.LogSet["sql"]
+	result.SQLLogTotal = result.LogTotal["sql"]
+	result.AppLogs = result.LogSet["app"]
+	result.AppLogTotal = result.LogTotal["app"]
+	result.SlowLogs = result.LogSet["slow"]
+	result.SlowLogTotal = result.LogTotal["slow"]
+
+	// ログファイル一覧の情報をJSON形式で保存
+	result_json, err := json.Marshal(result)
+	if err == nil {
+		fp, _ := os.Create(logfiles_json)
+		fp.Write(result_json)
+	}
+
+	return result, nil
 }
 
 func fetchLogSetList() ([]LogSet, error) {
@@ -159,21 +178,13 @@ func outputError(err error) {
 }
 
 func homeHandler(w http.ResponseWriter, r *http.Request) {
-	funcmap := template.FuncMap{
-		"num": numFormat,
-	}
-	t, err := template.New("home.html").Funcs(funcmap).ParseFS(templateFs, "templates/home.html")
-	if err != nil {
-		outputError(err)
-		return
-	}
 	logSetList, err := fetchLogSetList()
 	if err != nil {
 		outputError(err)
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	if t.Execute(w, map[string]interface{}{"logSetList": logSetList}) != nil {
+	if HTMLTemplate["home.html"].Execute(w, map[string]interface{}{"logSetList": logSetList}) != nil {
 		outputError(err)
 	}
 }
@@ -203,17 +214,9 @@ func detailHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		return
 	}
-	funcmap := template.FuncMap{
-		"num": numFormat,
-	}
-	t, err := template.New("detail.html").Funcs(funcmap).ParseFS(templateFs, "templates/detail.html")
-	if err != nil {
-		outputError(err)
-		return
-	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	if t.Execute(w, map[string]interface{}{"logSet": logSet}) != nil {
+	if HTMLTemplate["detail.html"].Execute(w, map[string]interface{}{"logSet": logSet}) != nil {
 		outputError(err)
 	}
 }
@@ -227,43 +230,19 @@ func outputLogs(w io.Writer, logs []LogFile) {
 	}
 }
 
-func rawAccessHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
+func createRawHandler(logType string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		logSet, err := getLogSetFromID(vars["id"])
+		if err != nil {
+			outputError(err)
+			w.WriteHeader(404)
+			return
+		}
+		w.WriteHeader(200)
+		w.Header().Set("Content-type", "text/plain")
+		outputLogs(w, logSet.LogSet[logType])
 	}
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/plain")
-	outputLogs(w, logSet.AccessLogs)
-}
-
-func rawAppHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/plain")
-	outputLogs(w, logSet.AppLogs)
-}
-
-func rawSlowHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/plain")
-	outputLogs(w, logSet.SlowLogs)
 }
 
 type UID struct {
@@ -318,23 +297,9 @@ func uidListHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	funcmap := template.FuncMap{
-		"num": numFormat,
-		"safe": func(s string) template.HTML {
-			return template.HTML(s)
-		},
-		"attr": func(s string) template.HTMLAttr {
-			return template.HTMLAttr(s)
-		},
-	}
-	t, err := template.New("uidlist.html").Funcs(funcmap).ParseFS(templateFs, "templates/uidlist.html")
-	if err != nil {
-		outputError(err)
-		return
-	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	if t.Execute(w, map[string]interface{}{"LogSet": logSet, "UIDList": uidList}) != nil {
+	if HTMLTemplate["uidlist.html"].Execute(w, map[string]interface{}{"LogSet": logSet, "UIDList": uidList}) != nil {
 		outputError(err)
 	}
 }
@@ -371,45 +336,28 @@ func uidQueryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func rawSqlHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
+func getCommandPath(cmdName string, pathEnvName string) string {
+	path := os.Getenv(pathEnvName)
+	if path != "" {
+		return path
 	}
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/plain")
-	outputLogs(w, logSet.SQLLogs)
+	goPath := os.Getenv("GOPATH")
+	if goPath == "" {
+		goPath = filepath.Join(os.Getenv("HOME"), "go")
+	}
+	path = filepath.Join(goPath, "bin", cmdName)
+	if f, err := os.Stat(path); !os.IsNotExist(err) && !f.IsDir() {
+		return path
+	}
+	return cmdName
 }
 
 func getKataribePath() string {
-	kataribePath := os.Getenv("KATARIBE_PATH")
-	if kataribePath != "" {
-		return kataribePath
-	}
-	homePath := os.Getenv("HOME")
-	goPath := os.Getenv("GOPATH")
-	if goPath == "" {
-		goPath = filepath.Join(homePath, "go")
-	}
-	kataribePath = filepath.Join(goPath, "bin", "kataribe")
-	return kataribePath
+	return getCommandPath("kataribe", "KATARIBE_PATH")
 }
 
 func getQueryDigestPath() string {
-	kataribePath := os.Getenv("QUERY_DIGEST_PATH")
-	if kataribePath != "" {
-		return kataribePath
-	}
-	homePath := os.Getenv("HOME")
-	goPath := os.Getenv("GOPATH")
-	if goPath == "" {
-		goPath = filepath.Join(homePath, "go")
-	}
-	kataribePath = filepath.Join(goPath, "bin", "go-mysql-query-digest")
-	return kataribePath
+	return getCommandPath("go-mysql-query-digest", "QUERY_DIGEST_PATH")
 }
 
 func execCommandFromLogsToWriter(w io.Writer, logs []LogFile, name string, arg ...string) error {
@@ -432,51 +380,21 @@ func execCommandFromLogsToWriter(w io.Writer, logs []LogFile, name string, arg .
 	return nil
 }
 
-func kataribeHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/plain")
-	err = execCommandFromLogsToWriter(w, logSet.AccessLogs, getKataribePath())
-	if err != nil {
-		outputError(err)
-	}
-}
-
-func kataribeAppHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/plain")
-	err = execCommandFromLogsToWriter(w, logSet.AppLogs, getKataribePath())
-	if err != nil {
-		outputError(err)
-	}
-}
-
-func queryDigestHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
-	}
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/plain")
-	err = execCommandFromLogsToWriter(w, logSet.SlowLogs, getQueryDigestPath())
-	if err != nil {
-		outputError(err)
+func createCommandHandler(logType string, cmdPath string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		logSet, err := getLogSetFromID(vars["id"])
+		if err != nil {
+			outputError(err)
+			w.WriteHeader(404)
+			return
+		}
+		w.WriteHeader(200)
+		w.Header().Set("Content-type", "text/plain")
+		err = execCommandFromLogsToWriter(w, logSet.LogSet[logType], cmdPath)
+		if err != nil {
+			outputError(err)
+		}
 	}
 }
 
@@ -688,20 +606,9 @@ func sqlAnalyzeHtmlHandler(w http.ResponseWriter, r *http.Request) {
 		return queryRecList[i].TotalTime > queryRecList[j].TotalTime
 	})
 
-	funcmap := template.FuncMap{
-		"num": numFormat,
-		"float3": func(v int) string {
-			return fmt.Sprintf("%.3f", float64(v)/1000000)
-		},
-	}
-	t, err := template.New("sqlanalyze.html").Funcs(funcmap).ParseFS(templateFs, "templates/sqlanalyze.html")
-	if err != nil {
-		outputError(err)
-		return
-	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/html")
-	if t.Execute(w, map[string]interface{}{"QueryList": queryRecList}) != nil {
+	if HTMLTemplate["sqlanalyze.html"].Execute(w, map[string]interface{}{"QueryList": queryRecList}) != nil {
 		outputError(err)
 	}
 
@@ -712,36 +619,64 @@ var (
 	perflogs_path string
 )
 
+var HTMLTemplateNames = []string{"detail.html", "home.html", "sqlanalyze.html", "uidlist.html"}
+var HTMLTemplate map[string]*template.Template = map[string]*template.Template{}
+
+func loadHTMLTemplate() {
+	funcmap := template.FuncMap{
+		"num": numFormat,
+		"float3": func(v int) string {
+			return fmt.Sprintf("%.3f", float64(v)/1000000)
+		},
+		"safe": func(s string) template.HTML {
+			return template.HTML(s)
+		},
+		"attr": func(s string) template.HTMLAttr {
+			return template.HTMLAttr(s)
+		},
+	}
+	for _, k := range HTMLTemplateNames {
+		t, err := template.New(k).Funcs(funcmap).ParseFS(templateFs, "templates/"+k)
+		if err != nil {
+			log.Fatalf("error Load Template: %v", err)
+		}
+		HTMLTemplate[k] = t
+	}
+}
+
 func main() {
+	loadHTMLTemplate()
 
 	// Load Settings
 	perflogs_port = getenv("PERFLOGS_PORT", ":8080")
 	perflogs_path = getenv("PERFLOGS_PATH", "logs")
 
 	// Log Start Message
-	log.Printf("Start Perf-Logs-Viewer (port=%s, dir=%s)", perflogs_port, perflogs_path)
+	log.Printf("Start Perf-Logs-Viewer (port=%s, dir=%s, url=http://localhost%s)", perflogs_port, perflogs_path, perflogs_port)
 
 	// Routing Settings
 	router := mux.NewRouter()
 	router.PathPrefix("/static/").Handler(http.FileServer(http.FS(staticFs)))
 	router.HandleFunc("/detail/{id}", detailHandler)
-	router.HandleFunc("/raw/access/{id}", rawAccessHandler)
-	router.HandleFunc("/raw/sql/{id}", rawSqlHandler)
-	router.HandleFunc("/raw/app/{id}", rawAppHandler)
-	router.HandleFunc("/raw/slow/{id}", rawSlowHandler)
-	router.HandleFunc("/kataribe/{id}", kataribeHandler)
-	router.HandleFunc("/kataribe-app/{id}", kataribeAppHandler)
+	router.HandleFunc("/raw/access/{id}", createRawHandler("web"))
+	router.HandleFunc("/raw/sql/{id}", createRawHandler("sql"))
+	router.HandleFunc("/raw/app/{id}", createRawHandler("app"))
+	router.HandleFunc("/raw/slow/{id}", createRawHandler("slow"))
+	router.HandleFunc("/kataribe/{id}", createCommandHandler("web", getKataribePath()))
+	router.HandleFunc("/kataribe-app/{id}", createCommandHandler("app", getKataribePath()))
 	router.HandleFunc("/uid/{id}", uidListHandler)
 	router.HandleFunc("/uid/{id}/{query}", uidQueryHandler)
 	router.HandleFunc("/sqlanalyze/{id}", sqlAnalyzeHandler)
 	router.HandleFunc("/sqlanalyze/html/{id}", sqlAnalyzeHtmlHandler)
-	router.HandleFunc("/query-digest/{id}", queryDigestHandler)
+	router.HandleFunc("/query-digest/{id}", createCommandHandler("slow", getQueryDigestPath()))
 	router.HandleFunc("/", homeHandler)
 
 	// Open Browser
-	browser, ok := os.LookupEnv("BROWSER")
-	if ok && browser != "" {
-		exec.Command(browser, "http://localhost"+perflogs_port).Start()
+	if len(os.Args) >= 2 && os.Args[1] == "browser" {
+		browser := os.Getenv("BROWSER")
+		if browser != "" {
+			exec.Command(browser, "http://localhost"+perflogs_port).Start()
+		}
 	}
 
 	// Start Web App Server
