@@ -409,14 +409,14 @@ type QueryRec struct {
 	Content     string
 }
 
-func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
+func analyzeSQLLog(logFiles []LogFile) []QueryRec {
 	query_count := make(map[string]int)
 	query_time := make(map[string]int)
 	query_times := make(map[string][]int)
 	for _, log := range logFiles {
 		fp, err := os.Open(log.Filename)
 		if err != nil {
-			return err
+			continue
 		}
 		defer fp.Close()
 		scanner := bufio.NewScanner(fp)
@@ -435,9 +435,6 @@ func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
 				query_times[query] = make([]int, 0)
 			}
 			query_times[query] = append(query_times[query], deltatime)
-		}
-		if err := scanner.Err(); err != nil {
-			return err
 		}
 	}
 
@@ -461,6 +458,12 @@ func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
 			AverageTime: query_time[k] / query_count[k],
 		})
 	}
+
+	return queryRecList
+}
+
+func analyzeSQLLogs(w io.Writer, logFiles []LogFile) error {
+	queryRecList := analyzeSQLLog(logFiles)
 
 	convertValues := func(q QueryRec) []string {
 		return []string{
@@ -553,54 +556,7 @@ func sqlAnalyzeHtmlHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query_count := make(map[string]int)
-	query_time := make(map[string]int)
-	query_times := make(map[string][]int)
-	for _, log := range logSet.SQLLogs {
-		fp, err := os.Open(log.Filename)
-		if err != nil {
-			continue
-		}
-		defer fp.Close()
-		scanner := bufio.NewScanner(fp)
-		for scanner.Scan() {
-			line := scanner.Text()
-			vs := strings.Split(line, "\t")
-			deltatime, _ := strconv.Atoi(vs[1])
-			query := vs[2]
-			if len(vs) >= 4 {
-				query = vs[3]
-			}
-			query_count[query] += 1
-			query_time[query] += deltatime
-			_, ok := query_times[query]
-			if !ok {
-				query_times[query] = make([]int, 0)
-			}
-			query_times[query] = append(query_times[query], deltatime)
-		}
-	}
-
-	for query := range query_times {
-		sort.Slice(query_times[query], func(i int, j int) bool {
-			return query_times[query][i] < query_times[query][j]
-		})
-	}
-
-	queryRecList := make([]QueryRec, 0)
-	for k := range query_count {
-		times := query_times[k]
-		queryRecList = append(queryRecList, QueryRec{
-			Content:     k,
-			Count:       query_count[k],
-			TotalTime:   query_time[k],
-			P50:         times[(len(times)-1)*50/100],
-			P90:         times[(len(times)-1)*90/100],
-			P99:         times[(len(times)-1)*99/100],
-			Max:         times[(len(times)-1)*100/100],
-			AverageTime: query_time[k] / query_count[k],
-		})
-	}
+	queryRecList := analyzeSQLLog(logSet.SQLLogs)
 
 	sort.SliceStable(queryRecList, func(i int, j int) bool {
 		return queryRecList[i].TotalTime > queryRecList[j].TotalTime
@@ -611,7 +567,6 @@ func sqlAnalyzeHtmlHandler(w http.ResponseWriter, r *http.Request) {
 	if HTMLTemplate["sqlanalyze.html"].Execute(w, map[string]interface{}{"QueryList": queryRecList}) != nil {
 		outputError(err)
 	}
-
 }
 
 var (
