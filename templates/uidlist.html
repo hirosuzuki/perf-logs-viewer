@@ -1,41 +1,40 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/static/favicon.png" sizes="16x16 24x24 32x32 48x48 64x64" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/bulma@0.9.3/css/bulma.min.css"
-    />
-    <style>
-        table {
-            font-family: monospace;
-            font-size: 85%;
-        }
-        .table td {
-          padding-top: 0.1em;
-          padding-bottom: 0.1em;
-        }
-    </style>
-  </head>
-  <body>
-    <div>
-      <table class="table is-hoverable is-fullwidth">
-        <tr>
-            <th rowspan="1">Count</th>
-            <th rowspan="1">ID</th>
-            <th rowspan="1">Start Request</th>
-        </tr>
-        {{ $root := . }}
-        {{ range $uid := .UIDList }}
-        <tr>
-            <td rowspan="1">{{ $uid.Times }}</td>
-            <td rowspan="1"><a href="/uid/{{ $root.LogSet.ID }}/{{ $uid.ID }}">{{ $uid.ID }}</a></td>
-            <td rowspan="1">{{ $uid.Request }}</td>
-        </tr>
-        {{ end }}
-      </table>
-    </div>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/png" href="/static/favicon.png" sizes="16x16 24x24 32x32 48x48 64x64" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.3/css/bulma.min.css" />
+  <style>
+    table {
+      font-family: monospace;
+      font-size: 85%;
+    }
+
+    .table td {
+      padding-top: 0.1em;
+      padding-bottom: 0.1em;
+    }
+  </style>
+</head>
+
+<body>
+  <table class="table is-hoverable is-fullwidth">
+    <tr>
+      <th rowspan="1">Count</th>
+      <th rowspan="1">ID</th>
+      <th rowspan="1">Start Request</th>
+    </tr>
+    {{ $root := . }}
+    {{ range $uid := .UIDList }}
+    <tr>
+      <td rowspan="1">{{ $uid.Times }}</td>
+      <td rowspan="1"><a href="/uid/{{ $root.LogSet.ID }}/{{ $uid.ID }}">{{ $uid.ID }}</a></td>
+      <td rowspan="1">{{ $uid.Request }}</td>
+    </tr>
+    {{ end }}
+  </table>
+</body>
+
 </html>

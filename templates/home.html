@@ -10,43 +10,43 @@
     />
   </head>
   <body>
-    <div class="container">
-      <div class="columns">
-        <div class="column is-four-fifths mt-2 mb-2">
-          <h1 class="is-size-4">Perf Logs Viewer</h1>
-        </div>
-        <div class="column has-text-right my-auto mr-5">
-          <a href="#">Settings</a>
-        </div>
-      </div>
-      <table class="table is-hoverable is-fullwidth">
+      <table class="table is-hoverable">
         <tr>
-          <th rowspan="1">ID</th>
-          <th rowspan="1">Start Time</th>
-          <th colspan="3">Web Server Logs</th>
-          <th colspan="3">SQL Logs</th>
+          <th class="has-text-left" rowspan="1">ID</th>
+          <th class="has-text-left" rowspan="1">Start Time</th>
+          <th class="has-text-centered" colspan="2">Web Server Logs</th>
+          <th class="has-text-centered" colspan="2">SQL Logs</th>
+          <th class="has-text-centered" colspan="2">App Logs</th>
+          <th class="has-text-centered" colspan="2">Slow Logs</th>
         </tr>
         {{ range $logSet := .logSetList }}
         <tr>
           <td ><a href="/detail/{{ $logSet.ID }}">{{ $logSet.ID }}</a></td>
           <td >{{ $logSet.ExecAt.Format "2006-01-02 15:04:05" }}</td>
-          <td class="has-text-right">All Servers</td>
           <td class="has-text-right">{{ num $logSet.AccessLogTotal }} bytes</td>
           <td>
             <a href="/raw/access/{{ $logSet.ID }}">Raw</a>
             <a href="/uid/{{ $logSet.ID }}">UID</a>
             <a href="/kataribe/{{ $logSet.ID }}">Kataribe</a>
           </td>
-          <td class="has-text-right">All Servers</td>
-          <td class="has-text-right">{{ num $logSet.SQLLogTolal }} bytes</td>
+          <td class="has-text-right">{{ num $logSet.SQLLogTotal }} bytes</td>
           <td>
             <a href="/raw/sql/{{ $logSet.ID }}">Raw</a>
             <a href="/sqlanalyze/html/{{ $logSet.ID }}">Total</a>
             <a href="/sqlanalyze/{{ $logSet.ID }}">Analyze</a>
           </td>
+          <td class="has-text-right">{{ num $logSet.AppLogTotal }} bytes</td>
+          <td>
+            <a href="/raw/app/{{ $logSet.ID }}">Raw</a>
+            <a href="/kataribe-app/{{ $logSet.ID }}">Kataribe</a>
+          </td>
+          <td class="has-text-right">{{ num $logSet.SlowLogTotal }} bytes</td>
+          <td>
+            <a href="/raw/slow/{{ $logSet.ID }}">Raw</a>
+            <a href="/query-digest/{{ $logSet.ID }}">Digest</a>
+          </td>
         </tr>
         {{ end }}
       </table>
-    </div>
   </body>
 </html>

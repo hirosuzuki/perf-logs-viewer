@@ -49,7 +49,11 @@ type LogSet struct {
 	AccessLogs     []LogFile
 	AccessLogTotal int64
 	SQLLogs        []LogFile
-	SQLLogTolal    int64
+	SQLLogTotal    int64
+	AppLogs        []LogFile
+	AppLogTotal    int64
+	SlowLogs       []LogFile
+	SlowLogTotal   int64
 }
 
 func makeLogFile(logfile fs.FileInfo, logSetID string, prefix string) (LogFile, bool) {
@@ -82,6 +86,8 @@ func fetchLogSet(file fs.FileInfo) (LogSet, error) {
 
 	accessLogs := []LogFile{}
 	sqlLogs := []LogFile{}
+	appLogs := []LogFile{}
+	slowLogs := []LogFile{}
 
 	// ログファイルの収集
 	logfiles, err := ioutil.ReadDir(filepath.Join(perflogs_path, logSetID))
@@ -94,6 +100,12 @@ func fetchLogSet(file fs.FileInfo) (LogSet, error) {
 		}
 		if sqlLog, ok := makeLogFile(logfile, logSetID, "sql"); ok {
 			sqlLogs = append(sqlLogs, sqlLog)
+		}
+		if appLog, ok := makeLogFile(logfile, logSetID, "app"); ok {
+			appLogs = append(appLogs, appLog)
+		}
+		if slowLog, ok := makeLogFile(logfile, logSetID, "mysql-slow"); ok {
+			slowLogs = append(slowLogs, slowLog)
 		}
 	}
 
@@ -111,8 +123,12 @@ func fetchLogSet(file fs.FileInfo) (LogSet, error) {
 		ExecAt:         execAt,
 		AccessLogTotal: calcTotalFileSize(accessLogs),
 		AccessLogs:     accessLogs,
-		SQLLogTolal:    calcTotalFileSize(sqlLogs),
+		SQLLogTotal:    calcTotalFileSize(sqlLogs),
 		SQLLogs:        sqlLogs,
+		AppLogTotal:    calcTotalFileSize(appLogs),
+		AppLogs:        appLogs,
+		SlowLogTotal:   calcTotalFileSize(slowLogs),
+		SlowLogs:       slowLogs,
 	}, nil
 }
 
@@ -224,6 +240,32 @@ func rawAccessHandler(w http.ResponseWriter, r *http.Request) {
 	outputLogs(w, logSet.AccessLogs)
 }
 
+func rawAppHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	logSet, err := getLogSetFromID(vars["id"])
+	if err != nil {
+		outputError(err)
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+	outputLogs(w, logSet.AppLogs)
+}
+
+func rawSlowHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	logSet, err := getLogSetFromID(vars["id"])
+	if err != nil {
+		outputError(err)
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+	outputLogs(w, logSet.SlowLogs)
+}
+
 type UID struct {
 	ID      string
 	Times   int
@@ -255,7 +297,7 @@ func uidListHandler(w http.ResponseWriter, r *http.Request) {
 			if len(vs) < 4 {
 				continue
 			}
-			uid := vs[1]
+			uid := vs[2]
 			if uid == "-" {
 				continue
 			}
@@ -297,10 +339,10 @@ func uidListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func uidHandler(w http.ResponseWriter, r *http.Request) {
+func uidQueryHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	logSet, err := getLogSetFromID(vars["id"])
-	uid := vars["uid"]
+	query := vars["query"]
 	if err != nil {
 		outputError(err)
 		w.WriteHeader(404)
@@ -319,11 +361,7 @@ func uidHandler(w http.ResponseWriter, r *http.Request) {
 		scanner := bufio.NewScanner(fp)
 		for scanner.Scan() {
 			line := scanner.Text()
-			vs := strings.SplitN(line, " ", 4)
-			if len(vs) < 4 {
-				continue
-			}
-			if vs[1] == uid {
+			if strings.Contains(line, query) {
 				fmt.Fprintln(w, line)
 			}
 		}
@@ -360,6 +398,20 @@ func getKataribePath() string {
 	return kataribePath
 }
 
+func getQueryDigestPath() string {
+	kataribePath := os.Getenv("QUERY_DIGEST_PATH")
+	if kataribePath != "" {
+		return kataribePath
+	}
+	homePath := os.Getenv("HOME")
+	goPath := os.Getenv("GOPATH")
+	if goPath == "" {
+		goPath = filepath.Join(homePath, "go")
+	}
+	kataribePath = filepath.Join(goPath, "bin", "go-mysql-query-digest")
+	return kataribePath
+}
+
 func execCommandFromLogsToWriter(w io.Writer, logs []LogFile, name string, arg ...string) error {
 	command := exec.Command(name, arg...)
 	stdinPipe, err := command.StdinPipe()
@@ -391,6 +443,38 @@ func kataribeHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
 	err = execCommandFromLogsToWriter(w, logSet.AccessLogs, getKataribePath())
+	if err != nil {
+		outputError(err)
+	}
+}
+
+func kataribeAppHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	logSet, err := getLogSetFromID(vars["id"])
+	if err != nil {
+		outputError(err)
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+	err = execCommandFromLogsToWriter(w, logSet.AppLogs, getKataribePath())
+	if err != nil {
+		outputError(err)
+	}
+}
+
+func queryDigestHandler(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	logSet, err := getLogSetFromID(vars["id"])
+	if err != nil {
+		outputError(err)
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(200)
+	w.Header().Set("Content-type", "text/plain")
+	err = execCommandFromLogsToWriter(w, logSet.SlowLogs, getQueryDigestPath())
 	if err != nil {
 		outputError(err)
 	}
@@ -536,7 +620,6 @@ func sqlAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(200)
 	w.Header().Set("Content-type", "text/plain")
-	//err = execCommandFromLogsToWriter(w, logSet.SQLLogs, "python3", "parse_log.py")
 	err = analyzeSQLLogs(w, logSet.SQLLogs)
 	if err != nil {
 		outputError(err)
@@ -644,11 +727,15 @@ func main() {
 	router.HandleFunc("/detail/{id}", detailHandler)
 	router.HandleFunc("/raw/access/{id}", rawAccessHandler)
 	router.HandleFunc("/raw/sql/{id}", rawSqlHandler)
+	router.HandleFunc("/raw/app/{id}", rawAppHandler)
+	router.HandleFunc("/raw/slow/{id}", rawSlowHandler)
 	router.HandleFunc("/kataribe/{id}", kataribeHandler)
+	router.HandleFunc("/kataribe-app/{id}", kataribeAppHandler)
 	router.HandleFunc("/uid/{id}", uidListHandler)
-	router.HandleFunc("/uid/{id}/{uid}", uidHandler)
+	router.HandleFunc("/uid/{id}/{query}", uidQueryHandler)
 	router.HandleFunc("/sqlanalyze/{id}", sqlAnalyzeHandler)
 	router.HandleFunc("/sqlanalyze/html/{id}", sqlAnalyzeHtmlHandler)
+	router.HandleFunc("/query-digest/{id}", queryDigestHandler)
 	router.HandleFunc("/", homeHandler)
 
 	// Open Browser

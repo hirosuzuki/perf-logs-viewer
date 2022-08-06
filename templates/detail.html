@@ -41,6 +41,22 @@
             {{ end }}
           </td>
         </tr>
+        <tr>
+          <th>AppLogs</th>
+          <td>
+            {{ range $log := .logSet.AppLogs }}
+            {{ $log.Filename }} ({{ num $log.Size }} bytes)<br/>
+            {{ end }}
+          </td>
+        </tr>
+        <tr>
+          <th>SlowLogs</th>
+          <td>
+            {{ range $log := .logSet.SlowLogs }}
+            {{ $log.Filename }} ({{ num $log.Size }} bytes)<br/>
+            {{ end }}
+          </td>
+        </tr>
       </table>
     </div>
   </body>
