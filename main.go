@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -64,7 +65,7 @@ type LogSet struct {
 
 func makeLogFile(logfile fs.FileInfo, logSetID string, prefix string) (LogFile, bool) {
 	name := logfile.Name()
-	if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".log") {
+	if strings.HasPrefix(name, prefix) && (strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".log.gz")) {
 		code := name[len(prefix) : len(name)-len(".log")]
 		code = strings.TrimPrefix(code, "-")
 		return LogFile{Code: code, Filename: filepath.Join(perflogs_path, logSetID, name), Size: logfile.Size()}, true
@@ -204,10 +205,29 @@ func detailHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func outputLogs(w io.Writer, logs []LogFile) {
-	for _, log := range logs {
-		buf, err := ioutil.ReadFile(log.Filename)
-		if err == nil {
-			w.Write(buf)
+	for _, logfile := range logs {
+		f, err := os.Open(logfile.Filename)
+		if err != nil {
+			log.Printf("error open file: %v", err)
+			continue
+		}
+		defer f.Close()
+		if strings.HasSuffix(logfile.Filename, ".gz") {
+			ze, err := gzip.NewReader(f)
+			if err != nil {
+				log.Printf("error read gzip file: %v", err)
+				continue
+			}
+			defer ze.Close()
+			_, err = io.Copy(w, ze)
+			if err == nil {
+				log.Printf("error io copy: %v", err)
+			}
+		} else {
+			_, err = io.Copy(w, f)
+			if err == nil {
+				log.Printf("error io copy: %v", err)
+			}
 		}
 	}
 }
