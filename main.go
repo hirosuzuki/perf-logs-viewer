@@ -124,11 +124,13 @@ func fetchLogSet(file fs.FileInfo) (LogSet, error) {
 		}
 	}
 
-	// ログファイル一覧の情報をJSON形式で保存
-	result_json, err := json.Marshal(result)
-	if err == nil {
-		fp, _ := os.Create(logfiles_json)
-		fp.Write(result_json)
+	// ログファイル一覧の情報をJSON形式で保存 (今は実行しない、今後情報キャッシュに利用予定)
+	if false {
+		result_json, err := json.Marshal(result)
+		if err == nil {
+			fp, _ := os.Create(logfiles_json)
+			fp.Write(result_json)
+		}
 	}
 
 	return result, nil
