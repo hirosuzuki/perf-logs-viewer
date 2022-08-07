@@ -204,31 +204,40 @@ func detailHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func outputLogs(w io.Writer, logs []LogFile) {
+func iterateLogs(logs []LogFile, handler func(io.Reader) error) error {
 	for _, logfile := range logs {
-		f, err := os.Open(logfile.Filename)
+		var src io.Reader
+		fp, err := os.Open(logfile.Filename)
 		if err != nil {
 			log.Printf("error open file: %v", err)
 			continue
 		}
-		defer f.Close()
+		defer fp.Close()
+		src = fp
 		if strings.HasSuffix(logfile.Filename, ".gz") {
-			ze, err := gzip.NewReader(f)
+			ze, err := gzip.NewReader(fp)
 			if err != nil {
 				log.Printf("error read gzip file: %v", err)
 				continue
 			}
 			defer ze.Close()
-			_, err = io.Copy(w, ze)
-			if err == nil {
-				log.Printf("error io copy: %v", err)
-			}
-		} else {
-			_, err = io.Copy(w, f)
-			if err == nil {
-				log.Printf("error io copy: %v", err)
-			}
+			src = ze
 		}
+		err = handler(src)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func outputLogs(w io.Writer, logs []LogFile) {
+	err := iterateLogs(logs, func(src io.Reader) error {
+		_, err := io.Copy(w, src)
+		return err
+	})
+	if err != nil {
+		log.Printf("error io copy: %v", err)
 	}
 }
 
@@ -253,87 +262,83 @@ type UID struct {
 	Request string
 }
 
-func uidListHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
-	}
-
-	uidSet := make(map[string]*UID)
-	uidList := make([]*UID, 0)
-
-	for _, log := range logSet.LogSet["web"] {
-		fp, err := os.Open(log.Filename)
+func createUidListHandler(logtype string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		logSet, err := getLogSetFromID(vars["id"])
 		if err != nil {
-			continue
+			outputError(err)
+			w.WriteHeader(404)
+			return
 		}
-		defer fp.Close()
-		scanner := bufio.NewScanner(fp)
-		for scanner.Scan() {
-			line := scanner.Text()
-			vs := strings.SplitN(line, " ", 4)
-			if len(vs) < 4 {
-				continue
-			}
-			uid := vs[2]
-			if uid == "-" {
-				continue
-			}
-			u := uidSet[uid]
-			if u == nil {
-				u = &UID{
-					ID:      uid,
-					Times:   0,
-					Request: vs[3],
-				}
-				uidList = append(uidList, u)
-				uidSet[uid] = u
-			}
-			u.Times++
-		}
-		if err := scanner.Err(); err != nil {
-			continue
-		}
-	}
 
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/html")
-	if HTMLTemplate["uidlist.html"].Execute(w, map[string]interface{}{"LogSet": logSet, "UIDList": uidList}) != nil {
-		outputError(err)
+		uidSet := make(map[string]*UID)
+		uidList := make([]*UID, 0)
+
+		err = iterateLogs(logSet.LogSet[logtype], func(src io.Reader) error {
+			scanner := bufio.NewScanner(src)
+			for scanner.Scan() {
+				line := scanner.Text()
+				vs := strings.SplitN(line, " ", 4)
+				if len(vs) < 4 {
+					continue
+				}
+				uid := vs[2]
+				if uid == "-" {
+					continue
+				}
+				u := uidSet[uid]
+				if u == nil {
+					u = &UID{
+						ID:      uid,
+						Times:   0,
+						Request: vs[3],
+					}
+					uidList = append(uidList, u)
+					uidSet[uid] = u
+				}
+				u.Times++
+			}
+			return scanner.Err()
+		})
+		if err != nil {
+			log.Printf("error log processing: %v", err)
+		}
+
+		w.WriteHeader(200)
+		w.Header().Set("Content-type", "text/html")
+		if HTMLTemplate["uidlist.html"].Execute(w, map[string]interface{}{"LogType": logtype, "LogSet": logSet, "UIDList": uidList}) != nil {
+			outputError(err)
+		}
 	}
 }
 
-func uidQueryHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	logSet, err := getLogSetFromID(vars["id"])
-	query := vars["query"]
-	if err != nil {
-		outputError(err)
-		w.WriteHeader(404)
-		return
-	}
-
-	w.WriteHeader(200)
-	w.Header().Set("Content-type", "text/plain")
-
-	for _, log := range logSet.LogSet["web"] {
-		fp, err := os.Open(log.Filename)
+func createUidQueryHandler(logType string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		logSet, err := getLogSetFromID(vars["id"])
+		query := vars["query"]
 		if err != nil {
-			continue
+			outputError(err)
+			w.WriteHeader(404)
+			return
 		}
-		defer fp.Close()
-		scanner := bufio.NewScanner(fp)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.Contains(line, query) {
-				fmt.Fprintln(w, line)
+
+		w.WriteHeader(200)
+		w.Header().Set("Content-type", "text/plain")
+
+		err = iterateLogs(logSet.LogSet[logType], func(src io.Reader) error {
+			scanner := bufio.NewScanner(src)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.Contains(line, query) {
+					fmt.Fprintln(w, line)
+				}
 			}
-		}
-		if err := scanner.Err(); err != nil {
-			continue
+			return scanner.Err()
+		})
+		if err != nil {
+			log.Printf("error log processing: %v", err)
 		}
 	}
 }
@@ -415,13 +420,9 @@ func analyzeSQLLog(logFiles []LogFile) []QueryRec {
 	query_count := make(map[string]int)
 	query_time := make(map[string]int)
 	query_times := make(map[string][]int)
-	for _, log := range logFiles {
-		fp, err := os.Open(log.Filename)
-		if err != nil {
-			continue
-		}
-		defer fp.Close()
-		scanner := bufio.NewScanner(fp)
+
+	err := iterateLogs(logFiles, func(src io.Reader) error {
+		scanner := bufio.NewScanner(src)
 		for scanner.Scan() {
 			line := scanner.Text()
 			vs := strings.Split(line, "\t")
@@ -438,6 +439,10 @@ func analyzeSQLLog(logFiles []LogFile) []QueryRec {
 			}
 			query_times[query] = append(query_times[query], deltatime)
 		}
+		return scanner.Err()
+	})
+	if err != nil {
+		log.Printf("error log processing: %v", err)
 	}
 
 	for query := range query_times {
@@ -615,17 +620,24 @@ func main() {
 	router := mux.NewRouter()
 	router.PathPrefix("/static/").Handler(http.FileServer(http.FS(staticFs)))
 	router.HandleFunc("/detail/{id}", detailHandler)
-	router.HandleFunc("/raw/access/{id}", createRawHandler("web"))
-	router.HandleFunc("/raw/sql/{id}", createRawHandler("sql"))
-	router.HandleFunc("/raw/app/{id}", createRawHandler("app"))
-	router.HandleFunc("/raw/slow/{id}", createRawHandler("slow"))
-	router.HandleFunc("/kataribe/{id}", createCommandHandler("web", getKataribePath()))
-	router.HandleFunc("/kataribe-app/{id}", createCommandHandler("app", getKataribePath()))
-	router.HandleFunc("/uid/{id}", uidListHandler)
-	router.HandleFunc("/uid/{id}/{query}", uidQueryHandler)
-	router.HandleFunc("/sqlanalyze/{id}", sqlAnalyzeHandler)
-	router.HandleFunc("/sqlanalyze/html/{id}", sqlAnalyzeHtmlHandler)
-	router.HandleFunc("/query-digest/{id}", createCommandHandler("slow", getQueryDigestPath()))
+
+	router.HandleFunc("/web/raw/{id}", createRawHandler("web"))
+	router.HandleFunc("/web/kataribe/{id}", createCommandHandler("web", getKataribePath()))
+	router.HandleFunc("/web/uid/{id}", createUidListHandler("web"))
+	router.HandleFunc("/web/uid/{id}/{query}", createUidQueryHandler("web"))
+
+	router.HandleFunc("/app/raw/{id}", createRawHandler("app"))
+	router.HandleFunc("/app/kataribe/{id}", createCommandHandler("app", getKataribePath()))
+	router.HandleFunc("/app/uid/{id}", createUidListHandler("app"))
+	router.HandleFunc("/app/uid/{id}/{query}", createUidQueryHandler("app"))
+
+	router.HandleFunc("/sql/raw/{id}", createRawHandler("sql"))
+	router.HandleFunc("/sql/analyze/{id}", sqlAnalyzeHandler)
+	router.HandleFunc("/sql/analyzehtml/{id}", sqlAnalyzeHtmlHandler)
+
+	router.HandleFunc("/slow/raw/{id}", createRawHandler("slow"))
+	router.HandleFunc("/slow/digest/{id}", createCommandHandler("slow", getQueryDigestPath()))
+
 	router.HandleFunc("/", homeHandler)
 
 	// Open Browser

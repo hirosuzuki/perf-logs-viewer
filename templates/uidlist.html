@@ -30,7 +30,7 @@
     {{ range $uid := .UIDList }}
     <tr>
       <td rowspan="1">{{ $uid.Times }}</td>
-      <td rowspan="1"><a href="/uid/{{ $root.LogSet.ID }}/{{ $uid.ID }}">{{ $uid.ID }}</a></td>
+      <td rowspan="1"><a href="/{{ $root.LogType }}/uid/{{ $root.LogSet.ID }}/{{ $uid.ID }}">{{ $uid.ID }}</a></td>
       <td rowspan="1">{{ $uid.Request }}</td>
     </tr>
     {{ end }}

@@ -25,25 +25,26 @@
           <td >{{ $logSet.ExecAt.Format "2006-01-02 15:04:05" }}</td>
           <td class="has-text-right">{{ num $logSet.LogTotal.web }} bytes</td>
           <td>
-            <a href="/raw/access/{{ $logSet.ID }}">Raw</a>
-            <a href="/uid/{{ $logSet.ID }}">UID</a>
-            <a href="/kataribe/{{ $logSet.ID }}">Kataribe</a>
+            <a href="/web/raw/{{ $logSet.ID }}">Raw</a>
+            <a href="/web/uid/{{ $logSet.ID }}">UID</a>
+            <a href="/web/kataribe/{{ $logSet.ID }}">Kataribe</a>
           </td>
           <td class="has-text-right">{{ num $logSet.LogTotal.sql }} bytes</td>
           <td>
-            <a href="/raw/sql/{{ $logSet.ID }}">Raw</a>
-            <a href="/sqlanalyze/html/{{ $logSet.ID }}">Total</a>
-            <a href="/sqlanalyze/{{ $logSet.ID }}">Analyze</a>
+            <a href="/sql/raw/{{ $logSet.ID }}">Raw</a>
+            <a href="/sql/analyzehtml/{{ $logSet.ID }}">Total</a>
+            <a href="/sql/analyze/{{ $logSet.ID }}">Analyze</a>
           </td>
           <td class="has-text-right">{{ num $logSet.LogTotal.app }} bytes</td>
           <td>
-            <a href="/raw/app/{{ $logSet.ID }}">Raw</a>
-            <a href="/kataribe-app/{{ $logSet.ID }}">Kataribe</a>
+            <a href="/app/raw/{{ $logSet.ID }}">Raw</a>
+            <a href="/app/uid/{{ $logSet.ID }}">UID</a>
+            <a href="/app/kataribe/{{ $logSet.ID }}">Kataribe</a>
           </td>
           <td class="has-text-right">{{ num $logSet.LogTotal.slow }} bytes</td>
           <td>
-            <a href="/raw/slow/{{ $logSet.ID }}">Raw</a>
-            <a href="/query-digest/{{ $logSet.ID }}">Digest</a>
+            <a href="/slow/raw/{{ $logSet.ID }}">Raw</a>
+            <a href="/slow/digest/{{ $logSet.ID }}">Digest</a>
           </td>
         </tr>
         {{ end }}
